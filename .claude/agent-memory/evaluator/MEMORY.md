@@ -1,0 +1,3 @@
+- [web-bi project overview](project_web-bi-overview.md) — Kan. Sheets BI Next.js+Auth.js+Prisma BI tool, no local DB/OAuth creds available for E2E
+- [Middleware Edge Runtime pitfall](feedback_nextjs-middleware-edge-runtime.md) — ALWAYS curl public+protected routes after `pnpm dev` AND run `pnpm build`; split-config pattern validated as the correct fix (Sprint 1 pass 2)
+- [Auth.js session strategy mismatch](feedback_authjs-session-strategy-mismatch.md) — grep session.strategy/cookies/jwt across split-config auth files; adapter presence silently flips jwt vs database strategy, breaks req.auth (Sprint 2 fatal bug, retroactively voided Sprint 1's "logged-in reaches protected page" claim)

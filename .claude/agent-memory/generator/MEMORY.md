@@ -1,0 +1,2 @@
+- [server-only modules untestable in vitest](feedback_server_only_testability.md) — extract pure logic/Zod schemas into dependency-free sibling modules before testing
+- [Auth.js split-config session strategy](feedback_authjs_split_config_session_strategy.md) — always pin session.strategy explicitly; adapter presence silently changes jwt vs database inference and breaks middleware
