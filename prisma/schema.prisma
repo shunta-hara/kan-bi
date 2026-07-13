@@ -1,0 +1,194 @@
+// Kan. Sheets BI — Prisma スキーマ
+// 仕様書 docs/bi-tool-spec.md §8 データモデル に準拠
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// Auth.js (Prisma Adapter) 標準モデル
+// https://authjs.dev/getting-started/adapters/prisma
+// ─────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────
+// アプリケーションモデル（仕様書 §8）
+// ─────────────────────────────────────────────
+
+enum Role {
+  VIEWER
+  EDITOR
+  ADMIN
+}
+
+enum AuthMode {
+  OAUTH
+  PUBLIC
+}
+
+enum SyncStatus {
+  IDLE
+  SYNCING
+  OK
+  ERROR
+  REAUTH_REQUIRED
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  role          Role         @default(EDITOR)
+  accounts    Account[]
+  sessions    Session[]
+  dataSources DataSource[]
+  dashboards  Dashboard[]
+  auditLogs   AuditLog[]
+  createdAt   DateTime     @default(now())
+}
+
+model DataSource {
+  id                 String     @id @default(cuid())
+  ownerId            String
+  owner              User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name               String
+  spreadsheetId      String
+  range              String
+  authMode           AuthMode   @default(OAUTH)
+  columnTypes        Json?
+  refreshIntervalSec Int        @default(300)
+  syncStatus         SyncStatus @default(IDLE)
+  lastSyncedAt       DateTime?
+  lastSyncError      String?
+  widgets            Widget[]
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([ownerId])
+}
+
+model Dashboard {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  layouts     Json     @default("{}")
+  widgets     Widget[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+model Widget {
+  id           String      @id @default(cuid())
+  dashboardId  String
+  dashboard    Dashboard   @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  dataSourceId String?
+  // FK は SetNull（User 削除時のカスケードと Restrict の競合で削除が失敗するのを回避）。
+  // 「使用中のデータソースは直接削除不可」の保護はアプリ層の使用中チェックで担保する。
+  dataSource   DataSource? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+  type         String
+  title        String?
+  query        Json
+  config       Json
+
+  @@index([dashboardId])
+  @@index([dataSourceId])
+}
+
+// ─────────────────────────────────────────────
+// PDF トークン（FEAT-013: 単回使用・短命・{userId, dashboardId} 束縛）
+// ─────────────────────────────────────────────
+
+/**
+ * PDF 出力用の単回使用トークンを管理するテーブル。
+ *
+ * - `jti`: JWT ID（ランダム UUID）。トークン使用時に `usedAt` を更新して再使用を防ぐ。
+ * - `userId` / `dashboardId`: トークンが束縛されたリソース（他ユーザー・他ダッシュボードで使用不可）。
+ * - `expiresAt`: 短命保証（例: 5 分後）。期限切れトークンは拒否する。
+ * - `usedAt`: 使用済みフラグ（非 null = 使用済み）。
+ * - 期限切れレコードは定期バッチで削除してよい（MVP では手動 or 生成時に古いレコードを削除）。
+ */
+model PdfToken {
+  id          String    @id @default(cuid())
+  jti         String    @unique
+  userId      String
+  dashboardId String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([dashboardId])
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────
+// 監査ログ（§6, §7: 認証成功/失敗・エクスポート等の重要操作を記録）
+// ─────────────────────────────────────────────
+
+enum AuditEventType {
+  AUTH_SIGN_IN_SUCCESS
+  AUTH_SIGN_IN_FAILURE
+  AUTH_SIGN_OUT
+  EXPORT_PDF
+  ACCOUNT_DELETE
+}
+
+model AuditLog {
+  id        String         @id @default(cuid())
+  type      AuditEventType
+  userId    String?
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email     String?
+  // 詳細情報（プロバイダ名、失敗理由、IPなど）。クライアントには生で返さず、必要な範囲のみ整形して提供する。
+  metadata  Json?
+  createdAt DateTime       @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}

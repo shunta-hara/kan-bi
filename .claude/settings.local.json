@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm dlx *)",
+      "Bash(mv scaffold_tmp/.gitignore .)",
+      "Bash(mv scaffold_tmp/eslint.config.mjs .)",
+      "Bash(mv scaffold_tmp/next.config.ts .)",
+      "Bash(mv scaffold_tmp/next-env.d.ts .)",
+      "Bash(mv scaffold_tmp/node_modules .)",
+      "Bash(mv scaffold_tmp/package.json .)",
+      "Bash(mv scaffold_tmp/pnpm-lock.yaml .)",
+      "Bash(mv scaffold_tmp/pnpm-workspace.yaml .)",
+      "Bash(mv scaffold_tmp/postcss.config.mjs .)",
+      "Bash(mv scaffold_tmp/public .)",
+      "Bash(pnpm install *)",
+      "Bash(ls /tmp/gen-test-cookie.mjs)",
+      "Bash(ls scripts-tmp-eval/)",
+      "Bash(powershell -Command ' *)"
+    ]
+  }
+}
