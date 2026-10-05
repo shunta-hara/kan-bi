@@ -23,6 +23,15 @@ import path from "path";
  */
 const chromiumExecutable = process.env.E2E_CHROMIUM_PATH;
 
+/**
+ * サーバー側 PDF 生成用のブラウザ置き場（任意）。
+ * Playwright が期待するリビジョンのブラウザが存在しない環境で、互換ブラウザのディレクトリを
+ * 指定することで、Next.js サーバー内の `chromium.launch()` が起動できるようになる。
+ * .env.e2e に E2E_SERVER_BROWSERS_PATH を設定すると PLAYWRIGHT_BROWSERS_PATH として
+ * Next.js サーバーに渡される。
+ */
+const serverBrowsersPath = process.env.E2E_SERVER_BROWSERS_PATH;
+
 /** フェッチスタブモジュールの絶対 file:// URL */
 const fetchStubUrl = `file://${path.join(process.cwd(), "e2e/support/fetch-stub.mjs")}`;
 
@@ -89,6 +98,12 @@ export default defineConfig({
       NODE_OPTIONS: `--import ${fetchStubUrl}`,
       PORT: appPort,
       AUTH_TRUST_HOST: "true",
+      // E2E_SERVER_BROWSERS_PATH が設定されているときだけ PLAYWRIGHT_BROWSERS_PATH を渡す。
+      // Playwright 1.60 が期待するブラウザリビジョンが存在しない環境で、互換ブラウザ置き場を
+      // 指定するために使用する（Sprint 2: サーバー側 PDF 生成）。
+      ...(serverBrowsersPath
+        ? { PLAYWRIGHT_BROWSERS_PATH: serverBrowsersPath }
+        : {}),
     } as Record<string, string>,
     stdout: "pipe",
     stderr: "pipe",
