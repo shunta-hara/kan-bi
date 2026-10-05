@@ -73,3 +73,37 @@ export function someLayoutItem(
 ): boolean {
   return Object.values(body.layouts).some((items) => items.some(predicate));
 }
+
+export type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * 位置・サイズが安定するまで待ってから、要素の bounding box を返す。
+ *
+ * react-grid-layout のカードは、初期表示・リロード・レイアウト変更のたびに位置とサイズが
+ * CSS トランジションでアニメーションする。アニメーション中に測ると値が毎回ばらつくため
+ * （リロード直後の x が 389〜485px でばらつくことを実測）、連続した 2 回の測定が一致するまで待つ。
+ */
+export async function stableBoundingBox(
+  target: Locator,
+  timeout = 5_000,
+): Promise<Box> {
+  let previous: Box | null = null;
+  await expect
+    .poll(
+      async () => {
+        const current = await target.boundingBox();
+        const isStable =
+          previous !== null &&
+          current !== null &&
+          previous.x === current.x &&
+          previous.y === current.y &&
+          previous.width === current.width &&
+          previous.height === current.height;
+        previous = current;
+        return isStable;
+      },
+      { timeout, intervals: [150] },
+    )
+    .toBe(true);
+  return previous as unknown as Box;
+}
