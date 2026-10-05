@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { AddWidgetDialog } from "@/components/dashboard/AddWidgetDialog";
 import { DashboardGrid } from "@/components/dashboard/DashboardGrid";
 import { WidgetEditDialog } from "@/components/dashboard/WidgetEditDialog";
-import { ChartWidget } from "@/components/charts/ChartWidget";
+import { WidgetDataArea } from "@/components/dashboard/WidgetDataArea";
 import type {
   AddWidgetState,
   DeleteWidgetState,
@@ -129,7 +129,6 @@ function WidgetCard({
   labels,
   editDialogLabels,
 }: WidgetCardProps) {
-  const t = useTranslations("chartWidget");
   const tCard = useTranslations("widgetCard");
 
   const [confirming, setConfirming] = useState(false);
@@ -171,51 +170,14 @@ function WidgetCard({
 
       {/* グラフ表示エリア（FEAT-BF-003: 3状態を区別して表示）
           FEAT-BF-005: min-h-0 overflow-hidden で flex-1 の高さをバインドし
-          ChartWidget が親コンテナを 100% 埋める CSS フィルモードで動作できるようにする */}
+          WidgetDataArea（ChartWidget）が親コンテナを 100% 埋める CSS フィルモードで動作できるようにする */}
       <div className="flex-1 min-h-0 overflow-hidden px-4 pb-2">
-        {widget.dataStatus.status === "ok" && widget.queryResult !== null ? (
-          <ChartWidget
-            title={widget.title ?? widget.type}
-            config={widget.config}
-            result={widget.queryResult}
-          />
-        ) : widget.dataStatus.status === "error" &&
-          widget.dataStatus.code === "REAUTH_REQUIRED" ? (
-          /* 再認可が必要な場合: データソース設定ページへの導線を提示 */
-          <div
-            className="flex h-full min-h-[120px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-yellow-300 bg-yellow-50 py-6 dark:border-yellow-700 dark:bg-yellow-950"
-            role="alert"
-            aria-label={t("reauthRequiredAriaLabel")}
-          >
-            <p className="text-xs text-yellow-800 dark:text-yellow-200">
-              {t("reauthRequiredMessage")}
-            </p>
-            <a
-              href="/datasources"
-              className="text-xs font-medium text-blue-600 underline underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              {t("reauthRequiredLink")}
-            </a>
-          </div>
-        ) : widget.dataStatus.status === "error" ? (
-          /* その他の取得失敗（FORBIDDEN / NETWORK_ERROR / UNKNOWN 等） */
-          <div
-            className="flex h-full min-h-[120px] items-center justify-center rounded-lg border border-dashed border-red-200 py-8 text-xs text-red-500 dark:border-red-800 dark:text-red-400"
-            role="alert"
-            aria-label={t("fetchErrorAriaLabel")}
-          >
-            {t("fetchErrorMessage")}
-          </div>
-        ) : (
-          /* データソース未設定 */
-          <div
-            className="flex h-full min-h-[120px] items-center justify-center rounded-lg border border-dashed border-black/10 py-8 text-xs text-black/40 dark:border-white/15 dark:text-white/60"
-            aria-label={t("noDataSourceAriaLabel")}
-            role="status"
-          >
-            {t("noDataSourceMessage")}
-          </div>
-        )}
+        <WidgetDataArea
+          dataStatus={widget.dataStatus}
+          queryResult={widget.queryResult}
+          title={widget.title ?? widget.type}
+          config={widget.config}
+        />
       </div>
 
       {/* フッター（編集・削除ボタン） */}
