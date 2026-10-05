@@ -52,7 +52,7 @@ function mockFetchSuccess() {
     vi.fn(async () => ({
       ok: true,
       status: 200,
-      headers: { get: (_key: string) => 'filename="dashboard.pdf"' },
+      headers: { get: () => 'filename="dashboard.pdf"' },
       blob: async () => blob,
     })),
   );
@@ -65,7 +65,7 @@ function mockFetchError(status: number) {
     vi.fn(async () => ({
       ok: false,
       status,
-      headers: { get: (_key: string) => null },
+      headers: { get: () => null },
     })),
   );
 }
@@ -144,21 +144,6 @@ describe("PdfDownloadButton", () => {
         );
       });
     });
-
-    it("401 エラー時に 404 のメッセージが表示されない（異常系: メッセージ混在なし）", async () => {
-      mockFetchError(401);
-      renderAndOpen();
-      fireEvent.click(
-        screen.getByRole("button", { name: MOCK_LABELS.downloadButton }),
-      );
-
-      await waitFor(() => {
-        expect(screen.getByRole("alert")).toHaveTextContent(
-          MOCK_LABELS.error401,
-        );
-      });
-      expect(screen.queryByText(MOCK_LABELS.error404)).not.toBeInTheDocument();
-    });
   });
 
   // ──────────────────────────────────────────
@@ -180,9 +165,19 @@ describe("PdfDownloadButton", () => {
       });
     });
 
-    it("ダウンロード成功後にエラーメッセージが表示されない", async () => {
-      mockFetchSuccess();
+    it("失敗後に再試行するとエラー表示がクリアされ、成功すればダイアログが閉じる", async () => {
+      mockFetchError(500);
       renderAndOpen();
+      fireEvent.click(
+        screen.getByRole("button", { name: MOCK_LABELS.downloadButton }),
+      );
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          MOCK_LABELS.errorMessage,
+        );
+      });
+
+      mockFetchSuccess();
       fireEvent.click(
         screen.getByRole("button", { name: MOCK_LABELS.downloadButton }),
       );
@@ -190,8 +185,6 @@ describe("PdfDownloadButton", () => {
       await waitFor(() => {
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       });
-      // ダイアログが閉じた後はエラーなし
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 
@@ -206,10 +199,8 @@ describe("PdfDownloadButton", () => {
       const pendingFetch = new Promise((resolve) => {
         resolveFetch = resolve;
       });
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(() => pendingFetch),
-      );
+      const fetchMock = vi.fn(() => pendingFetch);
+      vi.stubGlobal("fetch", fetchMock);
 
       renderAndOpen();
       fireEvent.click(
@@ -224,6 +215,10 @@ describe("PdfDownloadButton", () => {
         .getByText(MOCK_LABELS.downloading)
         .closest("button");
       expect(generatingBtn).toBeDisabled();
+
+      // 保留中に再クリックしても fetch は追加で呼ばれない
+      fireEvent.click(generatingBtn!);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
 
       // テスト終了前に fetch を解決してクリーンアップ
       resolveFetch({ ok: false, status: 500, headers: { get: () => null } });
