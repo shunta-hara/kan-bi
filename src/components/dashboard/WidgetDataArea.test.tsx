@@ -3,9 +3,8 @@
  *
  * テスト対象: データ取得状態（ok / no_datasource / error）に応じた描画の切り替え。
  *
- * - next-intl の useTranslations を vi.mock でモック。
- * - ChartWidget を vi.mock でモックし、レンダリング内容を単体で検証する。
- * - 正常系・異常系・境界値（未知の errorCode でも汎用エラー表示）を網羅。
+ * - next-intl の useTranslations は翻訳キーをそのまま返すモックに差し替える。
+ * - ChartWidget は軽量スタブに差し替える（ECharts の描画自体は対象外）。
  */
 
 import { render, screen } from "@testing-library/react";
@@ -15,28 +14,15 @@ import { WidgetDataArea } from "@/components/dashboard/WidgetDataArea";
 import type { WidgetDataStatus, WidgetConfig } from "@/lib/dashboards/schema";
 import type { QueryResult } from "@/lib/query/applyQuery";
 
-// ─────────────────────────────────────────────
-// モック
-// ─────────────────────────────────────────────
-
-// next-intl の useTranslations をモック。
-// 翻訳キーをそのまま返すことで、テスト内でキー名を直接 assert できる。
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-// ChartWidget を軽量なスタブに差し替える。
-// WidgetDataArea のテスト目的はデータ取得状態の分岐であり、
-// ECharts の描画そのものはここでは検証しない。
 vi.mock("@/components/charts/ChartWidget", () => ({
   ChartWidget: ({ title }: { title: string }) => (
     <div data-testid="chart-widget">{title}</div>
   ),
 }));
-
-// ─────────────────────────────────────────────
-// フィクスチャ
-// ─────────────────────────────────────────────
 
 const MOCK_CONFIG: WidgetConfig = {
   chartType: "bar",
@@ -55,383 +41,97 @@ const MOCK_QUERY_RESULT: QueryResult = {
   measureNames: ["count"],
 };
 
-// ─────────────────────────────────────────────
-// テストスイート
-// ─────────────────────────────────────────────
+function renderArea(
+  dataStatus: WidgetDataStatus,
+  queryResult: QueryResult | null = null,
+) {
+  return render(
+    <WidgetDataArea
+      dataStatus={dataStatus}
+      queryResult={queryResult}
+      title="売上グラフ"
+      config={MOCK_CONFIG}
+    />,
+  );
+}
 
 describe("WidgetDataArea", () => {
-  // ──────────────────────────────────────────
-  // 正常系: ok 状態
-  // ──────────────────────────────────────────
-
   describe("正常系: status=ok", () => {
-    it("status=ok かつ queryResult がある場合 ChartWidget が描画される", () => {
-      const dataStatus: WidgetDataStatus = { status: "ok" };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={MOCK_QUERY_RESULT}
-          title="売上グラフ"
-          config={MOCK_CONFIG}
-        />,
+    it("queryResult があれば ChartWidget にタイトルを渡して描画する", () => {
+      renderArea({ status: "ok" }, MOCK_QUERY_RESULT);
+
+      expect(screen.getByTestId("chart-widget")).toHaveTextContent(
+        "売上グラフ",
       );
-
-      expect(screen.getByTestId("chart-widget")).toBeInTheDocument();
-      expect(screen.getByText("売上グラフ")).toBeInTheDocument();
-    });
-
-    it("ChartWidget にタイトルが渡される", () => {
-      const dataStatus: WidgetDataStatus = { status: "ok" };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={MOCK_QUERY_RESULT}
-          title="月別売上"
-          config={MOCK_CONFIG}
-        />,
-      );
-
-      expect(screen.getByText("月別売上")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
     });
   });
-
-  // ──────────────────────────────────────────
-  // 異常系: status=ok だが queryResult が null
-  // ──────────────────────────────────────────
 
   describe("境界値: status=ok + queryResult=null", () => {
-    it("queryResult が null のとき ChartWidget は描画されずデータソース未設定表示になる", () => {
-      const dataStatus: WidgetDataStatus = { status: "ok" };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
+    it("ChartWidget は描画せず、データソース未設定表示にフォールバックする（現仕様）", () => {
+      // サーバーが ok を返しても結果が無い場合は、エラーではなく未設定表示に倒す。
+      renderArea({ status: "ok" }, null);
 
       expect(screen.queryByTestId("chart-widget")).not.toBeInTheDocument();
-      // no_datasource 状態と同じく status="status" の要素が表示される
-      expect(screen.getByRole("status")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "noDataSourceMessage",
+      );
     });
   });
 
-  // ──────────────────────────────────────────
-  // 正常系: no_datasource 状態
-  // ──────────────────────────────────────────
+  describe("status=no_datasource", () => {
+    it("未設定メッセージを role=status で表示し、ChartWidget は描画しない", () => {
+      renderArea({ status: "no_datasource" });
 
-  describe("正常系: status=no_datasource", () => {
-    it("データソース未設定メッセージが表示される", () => {
-      const dataStatus: WidgetDataStatus = { status: "no_datasource" };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "noDataSourceMessage",
       );
-
-      // useTranslations モックはキーをそのまま返す
-      expect(screen.getByText("noDataSourceMessage")).toBeInTheDocument();
-    });
-
-    it("役割 status の要素が表示される（アクセシビリティ）", () => {
-      const dataStatus: WidgetDataStatus = { status: "no_datasource" };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
+      expect(screen.getByRole("status")).toHaveAttribute(
+        "aria-label",
+        "noDataSourceAriaLabel",
       );
-
-      expect(screen.getByRole("status")).toBeInTheDocument();
-    });
-
-    it("ChartWidget は描画されない", () => {
-      const dataStatus: WidgetDataStatus = { status: "no_datasource" };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
       expect(screen.queryByTestId("chart-widget")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
-
-  // ──────────────────────────────────────────
-  // 異常系: error + REAUTH_REQUIRED
-  // ──────────────────────────────────────────
 
   describe("異常系: status=error, code=REAUTH_REQUIRED", () => {
-    it("再認可メッセージが表示される", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "REAUTH_REQUIRED",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
+    it("再認可メッセージとデータソース設定へのリンクを role=alert で表示する", () => {
+      renderArea({ status: "error", code: "REAUTH_REQUIRED" });
 
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveAttribute("aria-label", "reauthRequiredAriaLabel");
       expect(screen.getByText("reauthRequiredMessage")).toBeInTheDocument();
+      expect(screen.getByRole("link")).toHaveAttribute("href", "/datasources");
     });
 
-    it("データソース設定ページへのリンクが表示される", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "REAUTH_REQUIRED",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
-      const link = screen.getByRole("link");
-      expect(link).toBeInTheDocument();
-      expect(link).toHaveAttribute("href", "/datasources");
-    });
-
-    it("role=alert の要素が表示される（アクセシビリティ）", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "REAUTH_REQUIRED",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
-      expect(screen.getByRole("alert")).toBeInTheDocument();
-    });
-
-    it("ChartWidget は描画されない", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "REAUTH_REQUIRED",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
+    it("ChartWidget と汎用エラーメッセージは表示しない", () => {
+      renderArea({ status: "error", code: "REAUTH_REQUIRED" });
 
       expect(screen.queryByTestId("chart-widget")).not.toBeInTheDocument();
-    });
-
-    it("汎用エラーメッセージ（fetchErrorMessage）は表示されない", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "REAUTH_REQUIRED",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
       expect(screen.queryByText("fetchErrorMessage")).not.toBeInTheDocument();
     });
   });
 
-  // ──────────────────────────────────────────
-  // 異常系: error + その他コード
-  // ──────────────────────────────────────────
+  describe("異常系: REAUTH_REQUIRED 以外の取得失敗", () => {
+    it.each([
+      ["FORBIDDEN"],
+      ["NETWORK_ERROR"],
+      ["NOT_FOUND"],
+      ["UNKNOWN_XYZ"], // 境界値: 未知のコード
+      [""], // 境界値: 空文字
+    ])("code=%j は汎用エラーを表示し、再認可の導線は出さない", (code) => {
+      renderArea({ status: "error", code });
 
-  describe("異常系: status=error, code=FORBIDDEN", () => {
-    it("汎用エラーメッセージが表示される", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "FORBIDDEN",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveAttribute("aria-label", "fetchErrorAriaLabel");
       expect(screen.getByText("fetchErrorMessage")).toBeInTheDocument();
-    });
-
-    it("role=alert の要素が表示される（アクセシビリティ）", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "FORBIDDEN",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
-      expect(screen.getByRole("alert")).toBeInTheDocument();
-    });
-
-    it("REAUTH_REQUIRED のメッセージやリンクは表示されない", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "FORBIDDEN",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
       expect(
         screen.queryByText("reauthRequiredMessage"),
       ).not.toBeInTheDocument();
       expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    });
-  });
-
-  // ──────────────────────────────────────────
-  // 境界値: 未知の errorCode でも汎用エラー表示
-  // ──────────────────────────────────────────
-
-  describe("境界値: 未知の errorCode", () => {
-    it("未知の errorCode（UNKNOWN_XYZ 等）でも汎用エラーメッセージが表示される", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "UNKNOWN_XYZ",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
-      expect(screen.getByText("fetchErrorMessage")).toBeInTheDocument();
-      expect(screen.getByRole("alert")).toBeInTheDocument();
-      expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    });
-
-    it("空文字の errorCode でも汎用エラーメッセージが表示される（境界値: 空文字）", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
-      expect(screen.getByText("fetchErrorMessage")).toBeInTheDocument();
       expect(screen.queryByTestId("chart-widget")).not.toBeInTheDocument();
-    });
-
-    it("NETWORK_ERROR コードでも汎用エラーメッセージが表示される", () => {
-      const dataStatus: WidgetDataStatus = {
-        status: "error",
-        code: "NETWORK_ERROR",
-      };
-      render(
-        <WidgetDataArea
-          dataStatus={dataStatus}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-
-      expect(screen.getByText("fetchErrorMessage")).toBeInTheDocument();
-    });
-  });
-
-  // ──────────────────────────────────────────
-  // 境界値: 各状態の視覚的区別
-  // ──────────────────────────────────────────
-
-  describe("境界値: 各状態の描画が視覚的に区別される", () => {
-    it("ok 状態は ChartWidget を表示し、no_datasource とは描画が異なる", () => {
-      const { rerender } = render(
-        <WidgetDataArea
-          dataStatus={{ status: "ok" }}
-          queryResult={MOCK_QUERY_RESULT}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-      expect(screen.getByTestId("chart-widget")).toBeInTheDocument();
-
-      rerender(
-        <WidgetDataArea
-          dataStatus={{ status: "no_datasource" }}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-      expect(screen.queryByTestId("chart-widget")).not.toBeInTheDocument();
-      expect(screen.getByRole("status")).toBeInTheDocument();
-    });
-
-    it("error(REAUTH) と error(OTHER) は異なる描画になる", () => {
-      const { rerender } = render(
-        <WidgetDataArea
-          dataStatus={{ status: "error", code: "REAUTH_REQUIRED" }}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-      expect(screen.getByText("reauthRequiredMessage")).toBeInTheDocument();
-      expect(screen.getByRole("link")).toBeInTheDocument();
-
-      rerender(
-        <WidgetDataArea
-          dataStatus={{ status: "error", code: "FORBIDDEN" }}
-          queryResult={null}
-          title="グラフ"
-          config={MOCK_CONFIG}
-        />,
-      );
-      expect(
-        screen.queryByText("reauthRequiredMessage"),
-      ).not.toBeInTheDocument();
-      expect(screen.queryByRole("link")).not.toBeInTheDocument();
-      expect(screen.getByText("fetchErrorMessage")).toBeInTheDocument();
     });
   });
 });
