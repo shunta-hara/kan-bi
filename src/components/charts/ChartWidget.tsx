@@ -83,13 +83,20 @@ type Props = {
   /**
    * 印刷モード（FEAT-BF-002）。
    * - `true` のとき ECharts のアニメーションを無効化する（`animation: false`）。
-   *   アニメーション無効化により `finished` イベントの発火が安定する。
+   *   描画が `setOption` の内部で同期的に完了するため、PDF のキャプチャ結果が安定する。
+   *   なお、この場合 `finished` はイベント購読より前に発火して取り逃がすため、
+   *   完了通知は `onChartReady` 経由でも行う（`onFinished` の説明を参照）。
    */
   printMode?: boolean;
   /**
-   * ECharts の `finished` イベント発火時に呼ばれるコールバック（FEAT-BF-002）。
+   * チャートの描画完了時に呼ばれるコールバック（FEAT-BF-002）。
    * 印刷ページで全チャートの描画完了を `window.__chartsReady` フラグに反映するために使用する。
    * `printMode={true}` のときのみ有効にすることを推奨する。
+   *
+   * - 1 つのチャートにつき必ず 1 回だけ呼ばれる（ECharts の `finished` は複数回発火し得る）。
+   * - `printMode` ではアニメーションが無く、`setOption` の内部で描画と `finished` が同期的に
+   *   完了する。`echarts-for-react` はその後にイベントを購読するため `finished` を取り逃がす。
+   *   そのため `onChartReady`（購読後に呼ばれる）の時点で描画済みとして通知する。
    */
   onFinished?: () => void;
 };
@@ -119,9 +126,20 @@ export function ChartWidget({
   );
   const chartRef = useRef<ReactECharts>(null);
 
+  // 描画完了の通知は 1 チャートにつき 1 回に限る。
+  // 複数回通知すると、呼び出し側のカウントが実際のチャート数を超えて早期に「完了」になる。
+  // 通知するのは初回描画の完了のみで、同じインスタンスで option が差し替わっても再通知しない
+  // （印刷ページは option が変わらない前提。再描画の完了通知が必要な用途では見直すこと）。
+  const finishedReportedRef = useRef(false);
+  const reportFinished = useCallback(() => {
+    if (finishedReportedRef.current) return;
+    finishedReportedRef.current = true;
+    onFinished?.();
+  }, [onFinished]);
+
   const baseOption = buildChartOption(config, result);
   // 印刷モードではアニメーションを無効化する（FEAT-BF-002）。
-  // アニメーション無効化により ECharts の `finished` イベントが初回描画後に安定して発火する。
+  // 描画は setOption の内部で同期的に完了する（完了通知は reportFinished を参照）。
   const option = printMode ? { ...baseOption, animation: false } : baseOption;
 
   // KPI カードは専用表示
@@ -205,9 +223,11 @@ export function ChartWidget({
             role="img"
             onEvents={
               onFinished
-                ? ({ finished: onFinished } as Record<string, () => void>)
+                ? ({ finished: reportFinished } as Record<string, () => void>)
                 : undefined
             }
+            // printMode では finished が購読前に発火済みのため、購読後に呼ばれるこの時点で通知する
+            onChartReady={printMode && onFinished ? reportFinished : undefined}
           />
         </div>
       )}

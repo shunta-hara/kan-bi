@@ -85,7 +85,8 @@ export async function generateDashboardPdf(
     // `window.__chartsReady = true` をセットする。
     // - グラフなしダッシュボードの場合も即時フラグが立つため PDF 生成が完了する。
     // - 固定 1500ms 待機を廃止し、描画完了を正確に検知することで所要時間を短縮する。
-    await page.waitForFunction("window.__chartsReady === true", {
+    // 第 2 引数は `arg`（ページ関数への引数）であり、タイムアウトは第 3 引数 `options` で渡す。
+    await page.waitForFunction("window.__chartsReady === true", undefined, {
       timeout: 15_000,
     });
 
