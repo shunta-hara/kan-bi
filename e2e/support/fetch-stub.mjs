@@ -15,8 +15,11 @@
  *
  * スタブが返す固定データ:
  * - docs.google.com (gviz CSV): ヘッダー + 3行、文字列・数値・日付各1列
+ *   - URL パスに "-forbidden-" を含む場合は 403 を返す（FEAT-E2E-007 アクセス拒否テスト用）
  * - sheets.googleapis.com (Sheets API): 同等の JSON 形式
  * - oauth2.googleapis.com (トークン): ダミーアクセストークン
+ *   - リクエストボディに "e2e-reauth-invalid" を含む refresh_token は 400 invalid_grant を返す
+ *     （FEAT-E2E-007 REAUTH_REQUIRED テスト用）
  * - その他: 素通し (localhost 等を含む)
  */
 
@@ -41,6 +44,25 @@ const FIXED_TOKEN_JSON = JSON.stringify({
   expires_in: 3600,
   token_type: "Bearer",
 });
+
+const INVALID_GRANT_JSON = JSON.stringify({
+  error: "invalid_grant",
+  error_description: "Token has been expired or revoked.",
+});
+
+/**
+ * REAUTH_REQUIRED テスト用の特別な refresh_token 識別子。
+ * この文字列を含む refresh_token で oauth2.googleapis.com を呼ぶと 400 を返す。
+ * 値は e2e/support/stub-constants.ts の REAUTH_INVALID_REFRESH_TOKEN と一致している。
+ */
+const REAUTH_INVALID_REFRESH_TOKEN = "e2e-reauth-invalid";
+
+/**
+ * FORBIDDEN テスト用のスプレッドシート ID に含まれるマーカー。
+ * この文字列を含む spreadsheetId で docs.google.com を呼ぶと 403 を返す。
+ * 値は e2e/support/stub-constants.ts の FORBIDDEN_SPREADSHEET_MARKER と一致している。
+ */
+const FORBIDDEN_SPREADSHEET_MARKER = "-forbidden-";
 
 const originalFetch = globalThis.fetch;
 
@@ -69,11 +91,32 @@ function getHostname(url) {
   }
 }
 
+/**
+ * POST ボディから文字列表現を取得する。
+ * URLSearchParams / string / その他 toString() を試みる。
+ */
+function getBodyString(init) {
+  const body = init?.body;
+  if (!body) return "";
+  if (typeof body === "string") return body;
+  // URLSearchParams は toString() でエンコード済み文字列を返す
+  if (body && typeof body.toString === "function") return body.toString();
+  return "";
+}
+
 globalThis.fetch = async function stubbedFetch(input, init) {
-  const hostname = getHostname(getUrlString(input));
+  const urlStr = getUrlString(input);
+  const hostname = getHostname(urlStr);
 
   // docs.google.com → 固定 CSV (gviz エンドポイント)
+  // URL パスに FORBIDDEN_SPREADSHEET_MARKER を含む場合は 403 を返す
   if (hostname === "docs.google.com") {
+    if (urlStr.includes(FORBIDDEN_SPREADSHEET_MARKER)) {
+      return new Response("Forbidden", {
+        status: 403,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
     return new Response(FIXED_CSV, {
       status: 200,
       headers: { "Content-Type": "text/csv; charset=UTF-8" },
@@ -88,8 +131,16 @@ globalThis.fetch = async function stubbedFetch(input, init) {
     });
   }
 
-  // oauth2.googleapis.com → ダミートークン
+  // oauth2.googleapis.com → ダミートークン（または invalid_grant エラー）
+  // POST ボディに REAUTH_INVALID_REFRESH_TOKEN を含む場合は 400 invalid_grant を返す
   if (hostname === "oauth2.googleapis.com") {
+    const bodyStr = getBodyString(init);
+    if (bodyStr.includes(REAUTH_INVALID_REFRESH_TOKEN)) {
+      return new Response(INVALID_GRANT_JSON, {
+        status: 400,
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+      });
+    }
     return new Response(FIXED_TOKEN_JSON, {
       status: 200,
       headers: { "Content-Type": "application/json; charset=UTF-8" },
