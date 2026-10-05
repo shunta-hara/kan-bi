@@ -19,6 +19,9 @@ const eslintConfig = [
       "build/**",
       "next-env.d.ts",
       ".claude/hooks/**",
+      // Playwright の出力（失敗時の trace ビューアーなど minified な生成物を含む）
+      "playwright-report/**",
+      "test-results/**",
     ],
   },
 ];

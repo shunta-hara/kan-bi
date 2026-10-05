@@ -2,7 +2,7 @@
  * FEAT-E2E-003: 主要フロー
  *
  * ログイン（セッション注入）→ ダッシュボード作成 → データソース登録（固定 CSV プレビュー確認）
- * → ウィジェット作成 → レイアウト変更（自動保存）→ リロード後の状態確認 → PDF ダウンロード
+ * → ウィジェット作成 → リサイズ・移動（自動保存）→ リロード後の位置・サイズ確認 → PDF ダウンロード
  *
  * 各ステップは test.step で分割する。
  *
@@ -15,12 +15,13 @@
  * ブラウザインストール）が必要。未設定の環境では PDF 生成が失敗することがある。
  */
 
-import path from "node:path";
-import { createReadStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 
 import { test, expect } from "@playwright/test";
-import { createTestUser, cleanupUsers, prismaE2e } from "./support/db";
+import { createTestUser, cleanupUsers } from "./support/db";
+import { dragBy, someLayoutItem, waitForLayoutSave } from "./support/layout";
 import { injectSessionCookie } from "./support/session";
+import { clickUntilVisible, fillUntilEnabled } from "./support/ui";
 
 /** 固定 CSV のスタブ用 URL（fetch-stub.mjs が docs.google.com に固定データを返す） */
 const DS_URL =
@@ -44,6 +45,9 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
   const user = await createTestUser("main-flow");
   const userIds = [user.id];
 
+  /** 編集前のウィジェットカードの位置と幅。リロード後に復元された値との比較に使う */
+  let cardBeforeEdit = { x: 0, width: 0 };
+
   try {
     await injectSessionCookie(context, user);
 
@@ -61,10 +65,10 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
     // ─── Step 2: ダッシュボードを作成して編集画面に遷移する ───
     let dashboardId: string;
     await test.step("ダッシュボードを作成する", async () => {
-      await page.getByRole("button", { name: "新規作成" }).click();
-      await expect(
+      await clickUntilVisible(
+        page.getByRole("button", { name: "新規作成" }),
         page.getByRole("heading", { name: "新しいダッシュボードを作成" }),
-      ).toBeVisible({ timeout: 5_000 });
+      );
 
       await page.getByLabel("タイトル").fill(DASHBOARD_TITLE);
       await page.getByRole("button", { name: "作成する" }).click();
@@ -88,14 +92,19 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
         page.getByRole("heading", { name: "データソース", exact: true }),
       ).toBeVisible({ timeout: 10_000 });
 
-      // フォームを入力する
-      await page.getByLabel("名前").fill(DS_NAME);
-      await page.getByLabel("スプレッドシートの URL または ID").fill(DS_URL);
-      await page.getByLabel("読み込み範囲").fill(DS_RANGE);
+      // フォームを入力する（ハイドレーション前の入力は反映されないため、ボタンが有効になるまで再試行）
       // 取得方式: 公開シート（デフォルト）はそのまま
+      const previewButton = page.getByRole("button", {
+        name: "プレビューを取得",
+      });
+      await fillUntilEnabled(async () => {
+        await page.getByLabel("名前").fill(DS_NAME);
+        await page.getByLabel("スプレッドシートの URL または ID").fill(DS_URL);
+        await page.getByLabel("読み込み範囲").fill(DS_RANGE);
+      }, previewButton);
 
       // プレビューを取得する
-      await page.getByRole("button", { name: "プレビューを取得" }).click();
+      await previewButton.click();
 
       // 固定 CSV のプレビュー（"プレビュー" 見出し + "Name" 列）が表示されること
       await expect(
@@ -127,10 +136,10 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
         page.getByRole("heading", { name: DASHBOARD_TITLE }),
       ).toBeVisible({ timeout: 10_000 });
 
-      await page.getByRole("button", { name: "ウィジェットを追加" }).click();
-      await expect(
+      await clickUntilVisible(
+        page.getByRole("button", { name: "ウィジェットを追加" }),
         page.getByRole("heading", { name: "ウィジェットを追加" }),
-      ).toBeVisible({ timeout: 10_000 });
+      );
 
       // タイトルとデータソースを設定する
       await page.getByLabel("タイトル（任意）").fill(WIDGET_TITLE);
@@ -147,79 +156,56 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
       });
     });
 
-    // ─── Step 5: 編集モードでドラッグし、レイアウトが自動保存される ───
-    await test.step("レイアウトを変更して自動保存を確認する", async () => {
-      // 編集モードに切替
-      await page.getByRole("button", { name: "編集モード" }).click();
-      await expect(
+    // ─── Step 5: 編集モードでリサイズと移動を行い、変更後のレイアウトが自動保存される ───
+    // 1280px 幅では 6 カラムのブレークポイントが使われ、既定の幅 6 は全幅になる。
+    // そのため、まずリサイズで幅を狭めてから、右へ移動する（余白が無いと移動は元に戻る）。
+    await test.step("リサイズと移動でレイアウトを変更し、自動保存される", async () => {
+      await clickUntilVisible(
+        page.getByRole("button", { name: "編集モード" }),
         page.getByRole("button", { name: "閲覧モード" }),
-      ).toBeVisible({ timeout: 5_000 });
-
-      // PUT layout レスポンスを事前にリッスンする（ドラッグ前に登録しておく）
-      const layoutResponsePromise = page.waitForResponse(
-        (resp) =>
-          resp.url().includes(`/api/dashboards/${dashboardId}/layout`) &&
-          resp.request().method() === "PUT",
-        { timeout: 15_000 },
       );
 
-      // .drag-handle の位置を取得して段階的にドラッグする
-      const handle = page.locator(".drag-handle").first();
-      await handle.waitFor({ state: "visible" });
-      const box = await handle.boundingBox();
-      if (!box)
-        throw new Error("drag-handle の bounding box を取得できませんでした");
+      const card = page.locator(".react-grid-item").first();
+      const before = await card.boundingBox();
+      expect(before).not.toBeNull();
+      cardBeforeEdit = { x: before!.x, width: before!.width };
 
-      const cx = box.x + box.width / 2;
-      const cy = box.y + box.height / 2;
-      const moveDistance = 200; // 200px 下へ移動
+      // リサイズ: 右下のハンドルを左へ動かして幅を狭める。保存された本文で幅が縮んだことを確認する
+      const resizeSaved = waitForLayoutSave(page, dashboardId);
+      await dragBy(page, card.locator(".react-resizable-handle").first(), -300, 0);
+      const resizedLayout = await resizeSaved;
+      expect(someLayoutItem(resizedLayout, (item) => item.w < 6)).toBe(true);
 
-      // マウスをハンドル中心に移動 → ボタン押下 → 段階的移動 → ボタン解放
-      await page.mouse.move(cx, cy);
-      await page.mouse.down();
-      for (let step = 1; step <= 10; step++) {
-        await page.mouse.move(cx, cy + (moveDistance / 10) * step, {
-          steps: 2,
-        });
-      }
-      await page.mouse.move(cx, cy + moveDistance);
-      await page.mouse.up();
-
-      // デバウンス後に PUT layout が 200 で返ること（SAVE_DEBOUNCE_MS = 800ms）
-      const layoutResponse = await layoutResponsePromise;
-      expect(layoutResponse.status()).toBe(200);
+      // 移動: ヘッダー（ドラッグハンドル）を右へ動かす。保存された本文で x が増えたことを確認する
+      const moveSaved = waitForLayoutSave(page, dashboardId);
+      await dragBy(page, card.locator(".drag-handle").first(), 300, 0);
+      const movedLayout = await moveSaved;
+      expect(someLayoutItem(movedLayout, (item) => item.x > 0)).toBe(true);
     });
 
-    // ─── Step 6: リロード後もウィジェットが同じ位置・サイズで表示される ───
-    await test.step("リロード後もウィジェットが保持されている", async () => {
+    // ─── Step 6: リロード後もウィジェットが変更後の位置・サイズで表示される ───
+    await test.step("リロード後もウィジェットが変更後の位置・サイズで保持されている", async () => {
       // waitUntil: "load" で JS が読み込まれるのを待つ（次 step の PDF ボタンが React を必要とするため）
       await page.reload({ waitUntil: "load" });
-
-      // ウィジェットが引き続き表示されること
       await expect(page.getByText(WIDGET_TITLE)).toBeVisible({
         timeout: 15_000,
       });
 
-      // DB のレイアウトが保存済みであること（空オブジェクト "{}" でない）
-      const dbDashboard = await prismaE2e.dashboard.findUnique({
-        where: { id: dashboardId },
-        select: { layouts: true },
-      });
-      expect(dbDashboard).not.toBeNull();
-      const layouts = dbDashboard!.layouts as Record<string, unknown[]>;
-      const hasLayouts = Object.values(layouts).some(
-        (arr) => Array.isArray(arr) && arr.length > 0,
-      );
-      expect(hasLayouts).toBe(true);
+      // 保存されたレイアウトから復元された位置・サイズが、編集前と明確に違うこと
+      // （1 カラム ≒ 160px。リサイズで約 2 カラム縮み、右へ約 2 カラム動いている）
+      const after = await page.locator(".react-grid-item").first().boundingBox();
+      expect(after).not.toBeNull();
+      expect(after!.width).toBeLessThan(cardBeforeEdit.width - 100);
+      expect(after!.x).toBeGreaterThan(cardBeforeEdit.x + 100);
     });
 
     // ─── Step 7: PDF ダウンロードし、先頭が %PDF のバイナリを確認する ───
     await test.step("PDF をダウンロードして有効な PDF ファイルを確認する", async () => {
       // PDF 出力ボタンをクリックしてダイアログを開く
-      await page.getByRole("button", { name: "PDF 出力" }).click();
-      await expect(
+      await clickUntilVisible(
+        page.getByRole("button", { name: "PDF 出力" }),
         page.getByRole("dialog", { name: "PDF 出力オプション" }),
-      ).toBeVisible({ timeout: 10_000 });
+      );
 
       // PDF API レスポンスと download イベントを同時に待つ。
       // ダウンロードボタンクリックより先にリスナーを登録しておく（Promise.all の先頭要素から順に評価）。
@@ -229,7 +215,7 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
         page.waitForEvent("download", { timeout: 60_000 }),
         page.waitForResponse(
           (resp) =>
-            resp.url().includes("/pdf") &&
+            resp.url().includes(`/api/dashboards/${dashboardId}/pdf`) &&
             resp.request().method() === "GET" &&
             resp.status() === 200,
           { timeout: 60_000 },
@@ -246,7 +232,7 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
       if (!downloadPath)
         throw new Error("ダウンロードパスが取得できませんでした");
 
-      const content = await readFileAsBuffer(downloadPath);
+      const content = await readFile(downloadPath);
       expect(content.length).toBeGreaterThan(1024);
       expect(content.slice(0, 4).toString("ascii")).toBe("%PDF");
     });
@@ -254,18 +240,3 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
     await cleanupUsers(userIds);
   }
 });
-
-/**
- * ダウンロード済みファイルを Buffer として読み込む。
- */
-async function readFileAsBuffer(filePath: string): Promise<Buffer> {
-  const stream = createReadStream(path.resolve(filePath));
-  const chunks: Buffer[] = [];
-  return new Promise<Buffer>((resolve, reject) => {
-    stream.on("data", (chunk: Buffer | string) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-    stream.on("error", reject);
-  });
-}
