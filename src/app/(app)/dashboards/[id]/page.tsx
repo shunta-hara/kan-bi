@@ -220,6 +220,8 @@ export default async function DashboardDetailPage({ params }: PageProps) {
             downloadButton: t("pdfButton.downloadButton"),
             cancelButton: t("pdfButton.cancelButton"),
             errorMessage: t("pdfButton.errorMessage"),
+            error401: t("pdfButton.error401"),
+            error404: t("pdfButton.error404"),
             noWidgetsWarning: t("pdfButton.noWidgetsWarning"),
           }}
         />

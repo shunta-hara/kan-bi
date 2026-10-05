@@ -29,7 +29,12 @@ type Props = {
     orientationLandscape: string;
     downloadButton: string;
     cancelButton: string;
+    /** 500 やネットワークエラー等の汎用エラーメッセージ */
     errorMessage: string;
+    /** 401 Unauthorized（ログインセッション切れ）のエラーメッセージ */
+    error401: string;
+    /** 404 Not Found（ダッシュボードが存在しない）のエラーメッセージ */
+    error404: string;
     /** ウィジェットが 0 件のとき PDF 出力前に表示する警告メッセージ */
     noWidgetsWarning: string;
   };
@@ -53,7 +58,15 @@ export function PdfDownloadButton({ dashboardId, widgetCount, labels }: Props) {
       );
 
       if (!res.ok) {
-        throw new Error(`PDF generation failed: ${res.status}`);
+        // HTTP ステータスに応じてユーザー向けメッセージを出し分ける（FEAT-BF-008）
+        if (res.status === 401) {
+          setError(labels.error401);
+        } else if (res.status === 404) {
+          setError(labels.error404);
+        } else {
+          setError(labels.errorMessage);
+        }
+        return;
       }
 
       const blob = await res.blob();

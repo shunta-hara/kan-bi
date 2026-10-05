@@ -64,7 +64,9 @@
       "orientationLandscape": "横",
       "downloadButton": "ダウンロード",
       "cancelButton": "キャンセル",
-      "errorMessage": "PDF の生成に失敗しました。しばらくしてからもう一度お試しください。",
+      "errorMessage": "PDF の生成に失敗しました。再試行するか、しばらく経ってからお試しください。",
+      "error401": "ログインの有効期限が切れました。再度ログインしてください。",
+      "error404": "ダッシュボードが見つかりませんでした。",
       "noWidgetsWarning": "ウィジェットが追加されていません。ウィジェットを追加してから PDF を出力してください。"
     },
     "widgetDialog": {
