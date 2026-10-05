@@ -199,31 +199,67 @@ Kan. Sheets BI の品質を自動検証するため、Playwright を用いた E2
 ### 前提
 
 - Node.js（プロジェクト規定バージョン）と pnpm がインストールされていること
-- E2E 専用 PostgreSQL DB が用意されていること
-- `.env.e2e` を以下の変数を埋めて作成すること（`.gitignore` に追加すること）:
+- E2E 専用 PostgreSQL DB が用意されていること（DB 名に `e2e` を含めること。例: `kan_sheets_bi_e2e`）
+  - `e2e/run.mjs` は `DATABASE_URL` の DB 名に `e2e` が含まれない場合は起動を拒否する（開発・本番 DB への誤接続を防止）
+- `.env.e2e.example` をコピーして `.env.e2e` を作成し、必要な変数を埋めること:
 
+```bash
+cp .env.e2e.example .env.e2e
 ```
-DATABASE_URL=<E2E専用DB接続文字列>
-AUTH_SECRET=<E2E用秘密鍵（本番とは別の値）>
-AUTH_URL=http://localhost:3001
-AUTH_GOOGLE_ID=dummy
-AUTH_GOOGLE_SECRET=dummy
+
+`.env.e2e` に設定する必要がある変数:
+
+| 変数名 | 説明 |
+|--------|------|
+| `DATABASE_URL` | E2E 専用 DB の接続文字列（例: `postgresql://postgres:postgres@localhost:5432/kan_sheets_bi_e2e?schema=public`）|
+| `AUTH_SECRET` | Auth.js セッション署名用シークレット（本番とは別の値。`openssl rand -base64 32` で生成）|
+| `AUTH_URL` | E2E アプリの起動 URL（例: `http://localhost:3001`）|
+| `AUTH_GOOGLE_ID` | Google OAuth クライアント ID（E2E では `dummy` でよい）|
+| `AUTH_GOOGLE_SECRET` | Google OAuth クライアントシークレット（E2E では `dummy` でよい）|
+| `AUTH_TRUST_HOST` | `true`（localhost からのリクエストを Auth.js が許可するために必要）|
+
+任意の変数:
+
+| 変数名 | 説明 |
+|--------|------|
+| `E2E_CHROMIUM_PATH` | テストプロセス（Playwright）が使用する Chromium の実行ファイルパス。未設定の場合は Playwright 標準ブラウザを使用 |
+| `E2E_SERVER_BROWSERS_PATH` | サーバー側 PDF 生成用の互換ブラウザ置き場。Playwright が期待するリビジョンのブラウザが環境に存在しない場合に指定する。詳細は後述 |
+
+- Playwright の標準 Chromium を使う場合（`E2E_CHROMIUM_PATH` 未設定）は事前にインストールが必要:
+
+```bash
+pnpm exec playwright install chromium
 ```
+
+### `E2E_SERVER_BROWSERS_PATH` について
+
+サーバー側 PDF 生成（`/api/dashboards/:id/pdf`）では Next.js サーバーの中で Playwright が Chromium を起動する。
+Playwright は特定のリビジョン番号のブラウザを `PLAYWRIGHT_BROWSERS_PATH` 配下に期待する。
+
+環境によっては「Playwright が期待するリビジョン」と「インストール済みの Chromium」が一致しない場合があり、その場合は PDF 生成が失敗する。
+`E2E_SERVER_BROWSERS_PATH` を設定すると、`PLAYWRIGHT_BROWSERS_PATH` としてサーバープロセスに渡され、互換ブラウザを別ディレクトリで管理できる。
+
+互換ディレクトリの作り方（概要）:
+1. `pnpm exec playwright install chromium` を実行し、インストール先のパスを確認する（`~/.cache/ms-playwright/` など）
+2. サーバーが要求するリビジョン番号は `PLAYWRIGHT_BROWSERS_PATH` に同じ名前（`chromium-XXXX` または `chromium_headless_shell-XXXX`）のディレクトリを置くことで解決できる
+3. `E2E_SERVER_BROWSERS_PATH` に上記の親ディレクトリを指定する
 
 ### 実行
 
 ```bash
-# E2E テストの全シナリオを実行する
+# E2E テストの全シナリオを実行する（所要時間の目安: 約 1 分）
 pnpm e2e
 ```
 
 このコマンドは内部で以下を順に実行する:
 
-1. `.env.e2e` の環境変数を読み込む
-2. E2E 専用 DB にマイグレーションを適用する
-3. アプリを別ポート（`AUTH_URL` 指定のポート）で起動する
-4. Playwright テストを実行する
-5. アプリプロセスを終了する
+1. `.env.e2e` の環境変数を読み込む（`DATABASE_URL` が E2E 専用 DB であることを確認）
+2. E2E 専用 DB にマイグレーションを適用する（`prisma migrate deploy`）
+3. アプリを別ポート（`AUTH_URL` 指定のポート、デフォルト 3001）で起動する（フェッチスタブ付き）
+4. Playwright テストを実行する（`e2e/` 配下の全テストファイル）
+5. テスト終了後にアプリプロセスを終了する（成功・失敗どちらの場合も）
+
+失敗したテストの名前と失敗理由はターミナルに表示される。
 
 ### 通常テストとの分離確認
 
@@ -232,4 +268,19 @@ pnpm e2e
 pnpm vitest run
 ```
 
-`pnpm vitest run` の出力に E2E テストファイルが含まれないことを確認する。
+`vitest.config.ts` の `include` は `src/**/*.test.*` に限定されているため、`e2e/` 配下のファイルは含まれない。
+
+### トラブルシュート
+
+**ポート 3001 がすでに使用中**
+- 別のプロセスが 3001 番ポートを使用している場合、アプリの起動に失敗する
+- `lsof -i :3001` でプロセスを確認し、停止してから再実行する
+
+**DB 名ガードエラー（`DATABASE_URL must point to an E2E-only database`）**
+- `DATABASE_URL` に設定している DB 名に `e2e` が含まれていない
+- E2E 専用 DB を用意し、DB 名に `e2e` を含める（例: `kan_sheets_bi_e2e`）
+
+**ハイドレーション待ちヘルパーを使う理由**
+- Next.js の App Router ではページが読み込まれても、React のハイドレーションが完了するまでクリックや入力のイベントハンドラが付かない
+- `waitUntil: "load"` だけでは不十分で、コールドスタート時に実際に失敗するケースがある
+- `e2e/support/ui.ts` の `clickUntilVisible`（期待する要素が現れるまでクリックを再試行）と `fillUntilEnabled`（入力が反映されてボタンが有効になるまで再試行）を使うことで、ハイドレーション完了を実質的に待てる

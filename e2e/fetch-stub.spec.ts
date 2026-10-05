@@ -1,5 +1,5 @@
 /**
- * fetch スタブ単体のテスト（FEAT-E2E-001）。
+ * fetch スタブ単体のテスト（FEAT-E2E-001, FEAT-E2E-007）。
  *
  * スタブは Next サーバーのプロセスにだけ読み込まれるため、テストプロセスとは別の
  * Node プロセスに `--import` で読み込ませ、ホストの判定が完全一致であることを検証する。
@@ -17,10 +17,35 @@ const stubUrl = pathToFileURL(
 
 type ProbeResult = { status: number; body: string } | { error: string };
 
-/** スタブを読み込んだ別プロセスで、指定 URL を fetch した結果を返す */
+/** スタブを読み込んだ別プロセスで、指定 URL を GET した結果を返す */
 function probe(targetUrl: string): ProbeResult {
   const script = `
     fetch(${JSON.stringify(targetUrl)})
+      .then(async (r) => console.log(JSON.stringify({ status: r.status, body: await r.text() })))
+      .catch((e) => console.log(JSON.stringify({ error: e.name + ": " + e.message })));
+  `;
+  const out = execFileSync(
+    process.execPath,
+    ["--import", stubUrl, "-e", script],
+    { encoding: "utf-8", timeout: 15_000 },
+  );
+  return JSON.parse(out.trim()) as ProbeResult;
+}
+
+/**
+ * スタブを読み込んだ別プロセスで、指定 URL に POST リクエストを送り結果を返す。
+ * FEAT-E2E-007: oauth2.googleapis.com の refresh_token によるルーティングを検証する。
+ */
+function probePost(
+  targetUrl: string,
+  formBody: Record<string, string>,
+): ProbeResult {
+  const script = `
+    fetch(${JSON.stringify(targetUrl)}, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(${JSON.stringify(formBody)}),
+    })
       .then(async (r) => console.log(JSON.stringify({ status: r.status, body: await r.text() })))
       .catch((e) => console.log(JSON.stringify({ error: e.name + ": " + e.message })));
   `;
@@ -54,5 +79,51 @@ test.describe("fetch stub host matching — FEAT-E2E-001", () => {
 
     const pathMatch = probe("http://127.0.0.1:1/sheets.googleapis.com/x");
     expect(pathMatch).toHaveProperty("error");
+  });
+});
+
+test.describe("fetch stub error routing — FEAT-E2E-007", () => {
+  test("docs.google.com: -forbidden- を含む URL は 403 を返す", () => {
+    const result = probe(
+      "https://docs.google.com/spreadsheets/d/stub-forbidden-sheet-id/gviz/tq",
+    );
+    expect(result).toMatchObject({ status: 403 });
+  });
+
+  test("docs.google.com: -forbidden- を含まない通常の URL は 200 と固定 CSV を返す", () => {
+    const result = probe(
+      "https://docs.google.com/spreadsheets/d/stub-normal-sheet-id/gviz/tq",
+    );
+    expect(result).toMatchObject({ status: 200 });
+    expect("body" in result && result.body).toContain("Name,Revenue,OrderDate");
+  });
+
+  test("docs.google.com: -forbidden- がクエリ文字列にだけ含まれる URL は 403 にしない（パスで判定）", () => {
+    const result = probe(
+      "https://docs.google.com/spreadsheets/d/stub-normal-sheet-id/gviz/tq?sheet=my-forbidden-sheet&range=A1:C3",
+    );
+    expect(result).toMatchObject({ status: 200 });
+  });
+
+  test("oauth2.googleapis.com: e2e-reauth-invalid を含む refresh_token は 400 invalid_grant を返す", () => {
+    const result = probePost("https://oauth2.googleapis.com/token", {
+      grant_type: "refresh_token",
+      refresh_token: "e2e-reauth-invalid-token",
+      client_id: "dummy",
+      client_secret: "dummy",
+    });
+    expect(result).toMatchObject({ status: 400 });
+    expect("body" in result && result.body).toContain("invalid_grant");
+  });
+
+  test("oauth2.googleapis.com: 通常の refresh_token は 200 とダミートークンを返す", () => {
+    const result = probePost("https://oauth2.googleapis.com/token", {
+      grant_type: "refresh_token",
+      refresh_token: "normal-refresh-token",
+      client_id: "dummy",
+      client_secret: "dummy",
+    });
+    expect(result).toMatchObject({ status: 200 });
+    expect("body" in result && result.body).toContain("stub-access-token-e2e");
   });
 });

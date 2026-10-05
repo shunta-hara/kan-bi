@@ -47,6 +47,11 @@ export type E2eDataSource = {
   ownerId: string;
 };
 
+export type E2eWidget = {
+  id: string;
+  dashboardId: string;
+};
+
 // ─────────────────────────────────────────────
 // ユーザー操作
 // ─────────────────────────────────────────────
@@ -103,22 +108,95 @@ export async function createTestDashboard(
 // データソース操作
 // ─────────────────────────────────────────────
 
+/** createTestDataSource のオプション */
+export type CreateTestDataSourceOptions = {
+  spreadsheetId?: string;
+  range?: string;
+  authMode?: "PUBLIC" | "OAUTH";
+};
+
 /**
  * 指定ユーザーのデータソースを DB に作成する。
+ * overrides で spreadsheetId / range / authMode をカスタマイズできる。
  */
 export async function createTestDataSource(
   ownerId: string,
   name = "E2E DataSource",
+  overrides: CreateTestDataSourceOptions = {},
 ): Promise<E2eDataSource> {
   const ds = await prismaE2e.dataSource.create({
     data: {
       ownerId,
       name,
-      spreadsheetId: "stub-spreadsheet-id-e2e",
-      range: "Sheet1",
-      authMode: "PUBLIC",
+      spreadsheetId: overrides.spreadsheetId ?? "stub-spreadsheet-id-e2e",
+      range: overrides.range ?? "Sheet1",
+      authMode: overrides.authMode ?? "PUBLIC",
     },
     select: { id: true, ownerId: true },
   });
   return ds;
+}
+
+// ─────────────────────────────────────────────
+// ウィジェット操作
+// ─────────────────────────────────────────────
+
+/**
+ * 指定ダッシュボードにウィジェットを DB に直接作成する。
+ * FEAT-E2E-007: エラー分離テストでは UI を使わず DB に直接作成する。
+ */
+export async function createTestWidget(
+  dashboardId: string,
+  title: string,
+  dataSourceId?: string,
+): Promise<E2eWidget> {
+  const widget = await prismaE2e.widget.create({
+    data: {
+      dashboardId,
+      dataSourceId: dataSourceId ?? null,
+      type: "bar",
+      title,
+      query: { measures: [], filters: [], sorts: [] },
+      config: { chartType: "bar" },
+    },
+    select: { id: true, dashboardId: true },
+  });
+  return widget;
+}
+
+// ─────────────────────────────────────────────
+// OAuth アカウント操作
+// ─────────────────────────────────────────────
+
+/**
+ * 指定ユーザーの Google OAuth アカウントを DB に作成する。
+ * FEAT-E2E-007: REAUTH_REQUIRED テスト用。
+ *
+ * - scope に spreadsheets.readonly を含める（hasSheetsScope が true になる）
+ * - expires_at を過去に設定してアクセストークンを強制的に失効させる
+ * - refreshToken に "e2e-reauth-invalid" を含めると、スタブが 400 invalid_grant を返す
+ */
+export async function createTestOAuthAccount(
+  userId: string,
+  refreshToken: string,
+): Promise<void> {
+  await prismaE2e.account.create({
+    data: {
+      userId,
+      type: "oauth",
+      provider: "google",
+      providerAccountId: `e2e-google-${Date.now()}`,
+      access_token: "stub-access-token-expired",
+      refresh_token: refreshToken,
+      // 過去のタイムスタンプ（秒）: アクセストークンを失効させて refresh を強制する
+      expires_at: Math.floor(Date.now() / 1000) - 7200,
+      scope: [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "openid",
+        "email",
+        "profile",
+      ].join(" "),
+      token_type: "Bearer",
+    },
+  });
 }

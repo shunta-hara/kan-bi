@@ -19,7 +19,12 @@ import { readFile } from "node:fs/promises";
 
 import { test, expect } from "@playwright/test";
 import { createTestUser, cleanupUsers } from "./support/db";
-import { dragBy, someLayoutItem, waitForLayoutSave } from "./support/layout";
+import {
+  dragBy,
+  someLayoutItem,
+  stableBoundingBox,
+  waitForLayoutSave,
+} from "./support/layout";
 import { injectSessionCookie } from "./support/session";
 import { clickUntilVisible, fillUntilEnabled } from "./support/ui";
 
@@ -166,9 +171,9 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
       );
 
       const card = page.locator(".react-grid-item").first();
-      const before = await card.boundingBox();
-      expect(before).not.toBeNull();
-      cardBeforeEdit = { x: before!.x, width: before!.width };
+      // 初期表示のアニメーションが終わってから測る
+      const before = await stableBoundingBox(card);
+      cardBeforeEdit = { x: before.x, width: before.width };
 
       // リサイズ: 右下のハンドルを左へ動かして幅を狭める。保存された本文で幅が縮んだことを確認する
       const resizeSaved = waitForLayoutSave(page, dashboardId);
@@ -193,10 +198,10 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
 
       // 保存されたレイアウトから復元された位置・サイズが、編集前と明確に違うこと
       // （1 カラム ≒ 160px。リサイズで約 2 カラム縮み、右へ約 2 カラム動いている）
-      const after = await page.locator(".react-grid-item").first().boundingBox();
-      expect(after).not.toBeNull();
-      expect(after!.width).toBeLessThan(cardBeforeEdit.width - 100);
-      expect(after!.x).toBeGreaterThan(cardBeforeEdit.x + 100);
+      // 復元時のアニメーションが終わってから測る
+      const after = await stableBoundingBox(page.locator(".react-grid-item").first());
+      expect(after.width).toBeLessThan(cardBeforeEdit.width - 100);
+      expect(after.x).toBeGreaterThan(cardBeforeEdit.x + 100);
     });
 
     // ─── Step 7: PDF ダウンロードし、先頭が %PDF のバイナリを確認する ───
