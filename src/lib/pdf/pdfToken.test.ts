@@ -55,7 +55,11 @@ describe("consumePdfToken", () => {
     expect(payload.dashboardId).toBe(DASHBOARD_ID);
     expect(prismaMock.pdfToken.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ jti, usedAt: null }),
+        where: expect.objectContaining({
+          jti,
+          usedAt: null,
+          expiresAt: { gt: expect.any(Date) },
+        }),
       }),
     );
   });
@@ -66,7 +70,7 @@ describe("consumePdfToken", () => {
     prismaMock.pdfToken.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(consumePdfToken(token)).rejects.toThrow(
-      "PDF token already used",
+      "PDF token already used or expired",
     );
   });
 
