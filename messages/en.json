@@ -64,7 +64,9 @@
       "orientationLandscape": "Landscape",
       "downloadButton": "Download",
       "cancelButton": "Cancel",
-      "errorMessage": "Failed to generate PDF. Please try again later.",
+      "errorMessage": "Failed to generate PDF. Please retry or try again later.",
+      "error401": "Your session has expired. Please sign in again.",
+      "error404": "Dashboard not found.",
       "noWidgetsWarning": "No widgets found. Please add widgets before exporting PDF."
     },
     "widgetDialog": {
