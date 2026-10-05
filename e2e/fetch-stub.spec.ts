@@ -98,6 +98,13 @@ test.describe("fetch stub error routing — FEAT-E2E-007", () => {
     expect("body" in result && result.body).toContain("Name,Revenue,OrderDate");
   });
 
+  test("docs.google.com: -forbidden- がクエリ文字列にだけ含まれる URL は 403 にしない（パスで判定）", () => {
+    const result = probe(
+      "https://docs.google.com/spreadsheets/d/stub-normal-sheet-id/gviz/tq?sheet=my-forbidden-sheet&range=A1:C3",
+    );
+    expect(result).toMatchObject({ status: 200 });
+  });
+
   test("oauth2.googleapis.com: e2e-reauth-invalid を含む refresh_token は 400 invalid_grant を返す", () => {
     const result = probePost("https://oauth2.googleapis.com/token", {
       grant_type: "refresh_token",

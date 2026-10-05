@@ -104,6 +104,15 @@ function getBodyString(init) {
   return "";
 }
 
+/** URL のパス部分だけを返す（クエリ文字列は含めない）。パースできなければ空文字。 */
+function getPathname(url) {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return "";
+  }
+}
+
 globalThis.fetch = async function stubbedFetch(input, init) {
   const urlStr = getUrlString(input);
   const hostname = getHostname(urlStr);
@@ -111,7 +120,7 @@ globalThis.fetch = async function stubbedFetch(input, init) {
   // docs.google.com → 固定 CSV (gviz エンドポイント)
   // URL パスに FORBIDDEN_SPREADSHEET_MARKER を含む場合は 403 を返す
   if (hostname === "docs.google.com") {
-    if (urlStr.includes(FORBIDDEN_SPREADSHEET_MARKER)) {
+    if (getPathname(urlStr).includes(FORBIDDEN_SPREADSHEET_MARKER)) {
       return new Response("Forbidden", {
         status: 403,
         headers: { "Content-Type": "text/plain" },

@@ -47,25 +47,11 @@ test("正常・FORBIDDEN・REAUTH_REQUIRED ウィジェットが同一ページ�
   page.on("console", (msg) => {
     if (msg.type() === "error") {
       const text = msg.text();
-      // 既知のノイズを除外する（理由付き）:
-      //
-      // 1. React の DevMode 警告: ハイドレーション不一致は next dev でのみ発生することがあるが、
-      //    スタブ環境では再現しない。警告レベルのメッセージをスキップする。
-      if (
-        text.includes("Warning:") ||
-        text.includes("react-dom") ||
-        text.includes("Hydration")
-      ) {
-        return;
-      }
-      // 2. Next.js dev サーバーが Server 側ログをブラウザコンソールに転送する際の
-      //    構造化ログ（logWidgetFetchError が出力する widget_data_fetch_error など）。
-      //    これらは意図的なエラーログであり、予期しないアプリクラッシュではない。
-      //    Next.js が "%c%s%c ... Server " 形式で console.error を呼ぶ。
-      if (
-        text.includes("widget_data_fetch_error") ||
-        text.includes('"event":')
-      ) {
+      // 除外するのは、意図的な構造化ログ（logWidgetFetchError が出力する widget_data_fetch_error）のみ。
+      // Next.js の dev サーバーがサーバー側のログをブラウザのコンソールへ console.error として
+      // 転送するためで、取得失敗ウィジェットを意図的に作っているこのテストでは必ず出る。
+      // React の警告・ハイドレーション不一致などは握りつぶさず、失敗として検出する。
+      if (text.includes("widget_data_fetch_error")) {
         return;
       }
       consoleErrors.push(text);
