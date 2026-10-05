@@ -128,6 +128,8 @@ export function ChartWidget({
 
   // 描画完了の通知は 1 チャートにつき 1 回に限る。
   // 複数回通知すると、呼び出し側のカウントが実際のチャート数を超えて早期に「完了」になる。
+  // 通知するのは初回描画の完了のみで、同じインスタンスで option が差し替わっても再通知しない
+  // （印刷ページは option が変わらない前提。再描画の完了通知が必要な用途では見直すこと）。
   const finishedReportedRef = useRef(false);
   const reportFinished = useCallback(() => {
     if (finishedReportedRef.current) return;
