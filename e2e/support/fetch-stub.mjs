@@ -56,11 +56,24 @@ function getUrlString(input) {
   return "";
 }
 
+/**
+ * URL からホスト名を取り出す。パースできない入力（相対 URL 等）は空文字を返し、素通しにする。
+ * 部分一致ではなく完全一致で判定するため、クエリやパスに Google のホスト名を含む
+ * アプリ内部のリクエストを誤ってスタブしない。
+ */
+function getHostname(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
 globalThis.fetch = async function stubbedFetch(input, init) {
-  const url = getUrlString(input);
+  const hostname = getHostname(getUrlString(input));
 
   // docs.google.com → 固定 CSV (gviz エンドポイント)
-  if (url.includes("docs.google.com")) {
+  if (hostname === "docs.google.com") {
     return new Response(FIXED_CSV, {
       status: 200,
       headers: { "Content-Type": "text/csv; charset=UTF-8" },
@@ -68,7 +81,7 @@ globalThis.fetch = async function stubbedFetch(input, init) {
   }
 
   // sheets.googleapis.com → 固定 JSON (Sheets API v4)
-  if (url.includes("sheets.googleapis.com")) {
+  if (hostname === "sheets.googleapis.com") {
     return new Response(FIXED_SHEETS_JSON, {
       status: 200,
       headers: { "Content-Type": "application/json; charset=UTF-8" },
@@ -76,7 +89,7 @@ globalThis.fetch = async function stubbedFetch(input, init) {
   }
 
   // oauth2.googleapis.com → ダミートークン
-  if (url.includes("oauth2.googleapis.com")) {
+  if (hostname === "oauth2.googleapis.com") {
     return new Response(FIXED_TOKEN_JSON, {
       status: 200,
       headers: { "Content-Type": "application/json; charset=UTF-8" },

@@ -16,16 +16,21 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "path";
 
-/** Chromium 実行ファイルのパス (プリインストール済み) */
-const CHROMIUM_EXECUTABLE =
-  process.env.E2E_CHROMIUM_PATH ??
-  "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+/**
+ * Chromium 実行ファイルのパス（任意）。
+ * 未設定なら Playwright 標準のブラウザ（`pnpm exec playwright install chromium`）を使う。
+ * プリインストール済みの Chromium を使う環境では .env.e2e で E2E_CHROMIUM_PATH を指定する。
+ */
+const chromiumExecutable = process.env.E2E_CHROMIUM_PATH;
 
 /** フェッチスタブモジュールの絶対 file:// URL */
 const fetchStubUrl = `file://${path.join(process.cwd(), "e2e/support/fetch-stub.mjs")}`;
 
 /** E2E アプリの起動ポート (.env.e2e の AUTH_URL から取得) */
 const appUrl = process.env.AUTH_URL ?? "http://localhost:3001";
+
+/** アプリの待受ポート（AUTH_URL から導出し、起動待ちの URL とずらさない） */
+const appPort = new URL(appUrl).port || "3001";
 
 export default defineConfig({
   /** テストファイルのディレクトリ */
@@ -48,7 +53,7 @@ export default defineConfig({
 
   use: {
     baseURL: appUrl,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
   },
 
   projects: [
@@ -56,10 +61,10 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        /** プリインストール済み Chromium を使用 (playwright install は不要) */
-        launchOptions: {
-          executablePath: CHROMIUM_EXECUTABLE,
-        },
+        /** E2E_CHROMIUM_PATH 指定時のみ、プリインストール済み Chromium を使用 */
+        launchOptions: chromiumExecutable
+          ? { executablePath: chromiumExecutable }
+          : {},
       },
     },
   ],
@@ -67,24 +72,23 @@ export default defineConfig({
   /**
    * webServer: E2E テスト実行前にアプリを起動し、テスト終了後に停止する。
    *
-   * NODE_OPTIONS で fetch-stub.mjs を --import してサーバー側 fetch をスタブする。
-   * PORT で 3001 番ポートにバインドする。
-   * AUTH_TRUST_HOST=true で localhost からの Auth.js リクエストを許可する。
+   * - NODE_OPTIONS で fetch-stub.mjs を --import してサーバー側 fetch をスタブする。
+   * - PORT は AUTH_URL から導出する。
+   * - AUTH_TRUST_HOST=true で localhost からの Auth.js リクエストを許可する。
+   * - 環境変数は webServer.env で渡す（シェルの `VAR=value cmd` 構文は Windows で動かないため）。
    */
   webServer: {
-    command: [
-      `NODE_OPTIONS="--import ${fetchStubUrl}"`,
-      `PORT=3001`,
-      `AUTH_TRUST_HOST=true`,
-      "next dev",
-    ].join(" "),
+    command: "pnpm exec next dev",
     url: appUrl,
     reuseExistingServer: false,
     timeout: 120_000,
-    /** webServer も process.env (= .env.e2e を読み込んだ後の環境) を継承する */
+    /** process.env (= .env.e2e を読み込んだ後の環境) を継承し、E2E 用の値で上書きする */
     env: {
       ...process.env,
       NODE_ENV: "development",
+      NODE_OPTIONS: `--import ${fetchStubUrl}`,
+      PORT: appPort,
+      AUTH_TRUST_HOST: "true",
     } as Record<string, string>,
     stdout: "pipe",
     stderr: "pipe",

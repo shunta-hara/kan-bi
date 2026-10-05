@@ -44,6 +44,25 @@ for (const line of envContent.split("\n")) {
   }
 }
 
+// ─── 接続先ガード ───
+// migrate とテスト（ユーザーの作成・削除）は DATABASE_URL の DB に対して実行される。
+// 開発・本番 DB を誤って指していた場合の事故を防ぐため、E2E 専用 DB 以外では中止する。
+
+const databaseUrl = process.env.DATABASE_URL ?? "";
+let databaseName = "";
+try {
+  databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
+} catch {
+  // パース不能な値は下の判定で中止する
+}
+if (!databaseName.toLowerCase().includes("e2e")) {
+  console.error(
+    `Error: DATABASE_URL must point to an E2E-only database (name containing "e2e"), got "${databaseName || "(unparsable)"}".\n` +
+      "Refusing to run migrations and tests against it.",
+  );
+  process.exit(1);
+}
+
 // ─── E2E DB マイグレーション ───
 
 console.log("[e2e] Applying E2E DB migrations...");
