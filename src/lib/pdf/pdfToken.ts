@@ -116,7 +116,8 @@ export async function consumePdfToken(token: string): Promise<PdfTokenPayload> {
 
   const payload = parsed.data;
 
-  // DB で jti の存在・未使用を確認し、アトミックに usedAt をセット
+  // DB で jti の存在・未使用・期限・束縛を確認する（エラー種別を出し分けるための事前チェック）。
+  // 単回使用の保証は、この後の updateMany による条件付き更新で行う。
   const record = await prisma.pdfToken.findUnique({
     where: { jti: payload.jti },
   });
@@ -138,11 +139,17 @@ export async function consumePdfToken(token: string): Promise<PdfTokenPayload> {
     throw new Error("PDF token binding mismatch");
   }
 
-  // 単回使用: usedAt を設定してトークンを無効化
-  await prisma.pdfToken.update({
-    where: { jti: payload.jti },
-    data: { usedAt: new Date() },
+  // 単回使用: 未使用・未失効の場合のみ usedAt をアトミックにセットする。
+  // 上の findUnique との間に、並行リクエストが先に消費した場合や失効した場合は
+  // count が 0 になり拒否される。
+  const now = new Date();
+  const { count } = await prisma.pdfToken.updateMany({
+    where: { jti: payload.jti, usedAt: null, expiresAt: { gt: now } },
+    data: { usedAt: now },
   });
+  if (count !== 1) {
+    throw new Error("PDF token already used or expired");
+  }
 
   return payload;
 }
