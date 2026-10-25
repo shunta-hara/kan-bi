@@ -175,17 +175,20 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
       const before = await stableBoundingBox(card);
       cardBeforeEdit = { x: before.x, width: before.width };
 
-      // リサイズ: 右下のハンドルを左へ動かして幅を狭める。保存された本文で幅が縮んだことを確認する
-      const resizeSaved = waitForLayoutSave(page, dashboardId);
+      // リサイズ: 右下のハンドルを左へ動かして幅を狭める。
+      // 「幅が縮んだレイアウト」の保存が成功するまで待つ（変更を含まない保存は読み飛ばす）
+      const resizeSaved = waitForLayoutSave(page, dashboardId, (body) =>
+        someLayoutItem(body, (item) => item.w < 6),
+      );
       await dragBy(page, card.locator(".react-resizable-handle").first(), -300, 0);
-      const resizedLayout = await resizeSaved;
-      expect(someLayoutItem(resizedLayout, (item) => item.w < 6)).toBe(true);
+      await resizeSaved;
 
-      // 移動: ヘッダー（ドラッグハンドル）を右へ動かす。保存された本文で x が増えたことを確認する
-      const moveSaved = waitForLayoutSave(page, dashboardId);
+      // 移動: ヘッダー（ドラッグハンドル）を右へ動かす。「x が増えたレイアウト」の保存を待つ
+      const moveSaved = waitForLayoutSave(page, dashboardId, (body) =>
+        someLayoutItem(body, (item) => item.x > 0),
+      );
       await dragBy(page, card.locator(".drag-handle").first(), 300, 0);
-      const movedLayout = await moveSaved;
-      expect(someLayoutItem(movedLayout, (item) => item.x > 0)).toBe(true);
+      await moveSaved;
     });
 
     // ─── Step 6: リロード後もウィジェットが変更後の位置・サイズで表示される ───

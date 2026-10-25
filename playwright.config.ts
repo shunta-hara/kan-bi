@@ -45,6 +45,12 @@ export default defineConfig({
   /** テストファイルのディレクトリ */
   testDir: "./e2e",
 
+  /**
+   * テスト開始前に主要ルートを 1 回ずつ要求し、next dev の初回コンパイルを済ませる。
+   * （webServer は globalSetup より先に起動する）
+   */
+  globalSetup: "./e2e/support/warmup.ts",
+
   /** 各テストのタイムアウト (ms) */
   timeout: 30_000,
 
