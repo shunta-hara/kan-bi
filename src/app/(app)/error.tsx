@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useTranslations } from "next-intl";
+import { reportClientError } from "@/lib/observability/reportClientError";
 
 type Props = {
   error: Error & { digest?: string };
@@ -14,6 +15,7 @@ export default function AppError({ error, reset }: Props) {
 
   useEffect(() => {
     console.error(error);
+    void reportClientError(error);
   }, [error]);
 
   return (

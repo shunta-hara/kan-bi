@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth/auth";
 import { deleteUserAccount } from "@/lib/account/deleteAccount";
+import { captureServerException } from "@/lib/observability/logger";
 
 export type DeleteAccountState =
   | { status: "idle" }
@@ -42,6 +43,10 @@ export async function deleteAccountAction(
     await deleteUserAccount(session.user.id);
   } catch (error) {
     console.error("[account] deleteAccountAction failed", error);
+    captureServerException(
+      error instanceof Error ? error : new Error(String(error)),
+      { errorCode: "ACCOUNT_DELETE_FAILED" },
+    );
     return {
       status: "error",
       message:

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { deleteUserAccount } from "@/lib/account/deleteAccount";
 import { deleteAccountInputSchema } from "@/lib/account/schema";
+import { captureServerException } from "@/lib/observability/logger";
 
 /**
  * `DELETE /api/user/account`
@@ -60,6 +61,10 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     await deleteUserAccount(session.user.id);
   } catch (error) {
     console.error("[account] failed to delete account", error);
+    captureServerException(
+      error instanceof Error ? error : new Error(String(error)),
+      { errorCode: "ACCOUNT_DELETE_FAILED" },
+    );
     return NextResponse.json(
       {
         error: {

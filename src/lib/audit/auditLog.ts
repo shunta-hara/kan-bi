@@ -5,6 +5,7 @@ import {
   recordAuditEventInputSchema,
   type RecordAuditEventInput,
 } from "@/lib/audit/schema";
+import { captureServerException } from "@/lib/observability/logger";
 
 // 監査ログのスキーマ・型は `lib/audit/schema.ts` に集約する（テスト容易性のため
 // `server-only` / `prisma` 初期化と分離している）。利用側の互換性のためここから再公開する。
@@ -39,5 +40,9 @@ export async function recordAuditEvent(
   } catch (error) {
     // 監査ログの保存失敗でユーザー操作自体を失敗させない（非機能要件: 信頼性）。
     console.error("[audit] failed to record audit event", error);
+    captureServerException(
+      error instanceof Error ? error : new Error(String(error)),
+      { errorCode: "AUDIT_LOG_FAILED" },
+    );
   }
 }
