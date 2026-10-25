@@ -61,10 +61,7 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     await deleteUserAccount(session.user.id);
   } catch (error) {
     console.error("[account] failed to delete account", error);
-    captureServerException(
-      error instanceof Error ? error : new Error(String(error)),
-      { errorCode: "ACCOUNT_DELETE_FAILED" },
-    );
+    captureServerException(error, { errorCode: "ACCOUNT_DELETE_FAILED" });
     return NextResponse.json(
       {
         error: {

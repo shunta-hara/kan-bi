@@ -50,6 +50,18 @@ export function logWidgetFetchError(params: {
 }
 
 /**
+ * `@sentry/nextjs` の読み込みを 1 回に共有する。
+ * 呼び出しごとに `import()` すると、同じ tick で続けて呼ばれたとき（モック環境）に 2 回目以降が
+ * 解決されず、後続の `catch` に握りつぶされて送信が静かに失われる。
+ */
+let sentryModulePromise: Promise<typeof import("@sentry/nextjs")> | undefined;
+
+function loadSentry(): Promise<typeof import("@sentry/nextjs")> {
+  sentryModulePromise ??= import("@sentry/nextjs");
+  return sentryModulePromise;
+}
+
+/**
  * Sentry にエラーレポートを送信する（FEAT-SEN-005）。
  *
  * - `REAUTH_REQUIRED` のようなユーザー起因の想定内エラーは `level: "warning"` で送信し、
@@ -59,26 +71,27 @@ export function logWidgetFetchError(params: {
  * - DSN が未設定の場合は Sentry が初期化されておらず no-op となる。
  * - fire-and-forget: 非同期で送信し、呼び出し元をブロックしない。
  *
- * @param error 送信するエラーオブジェクト
+ * @param error 送信するエラー（Error 以外の値でもよい。関数内で Error に正規化する）
  * @param context タグとして付与するコンテキスト情報
  */
 export function captureServerException(
-  error: Error,
+  error: unknown,
   context: {
     errorCode?: string;
     dataSourceId?: string;
     widgetId?: string;
-    [key: string]: string | undefined;
   },
 ): void {
   // DSN が未設定なら @sentry/nextjs を一切 import しない（dev/test での無駄なロードを防ぐ）。
   if (!process.env.SENTRY_DSN?.trim()) return;
 
   const level = context.errorCode === "REAUTH_REQUIRED" ? "warning" : "error";
+  // catch 句の値は Error とは限らない。呼び出し側で正規化させず、ここで Error に揃える。
+  const exception = error instanceof Error ? error : new Error(String(error));
 
-  void import("@sentry/nextjs")
+  void loadSentry()
     .then(({ captureException }) => {
-      captureException(error, {
+      captureException(exception, {
         level,
         tags: {
           ...(context.errorCode != null && { errorCode: context.errorCode }),

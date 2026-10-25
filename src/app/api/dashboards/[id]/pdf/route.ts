@@ -98,9 +98,7 @@ export async function GET(
     });
   } catch (e) {
     console.error("[pdf] PDF generation failed", e);
-    captureServerException(e instanceof Error ? e : new Error(String(e)), {
-      errorCode: "PDF_GENERATION_FAILED",
-    });
+    captureServerException(e, { errorCode: "PDF_GENERATION_FAILED" });
     return NextResponse.json(
       { error: "PDF generation failed" },
       { status: 500 },

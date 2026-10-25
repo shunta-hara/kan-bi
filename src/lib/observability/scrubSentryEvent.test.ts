@@ -334,4 +334,51 @@ describe("scrubSentryEvent", () => {
     expect(result.request?.url).toBe("https://example.com/api/test");
     expect(result.request?.data).toBeUndefined();
   });
+
+  // --- メッセージ本文の伏せ字（Prisma / Auth.js などのエラーが値を含み得る） ---
+
+  describe("メッセージ本文の伏せ字", () => {
+    const email = ["someone", "example.com"].join("@");
+
+    it("message / logentry.message / exception の value / breadcrumb の message を伏せ字にする", () => {
+      const result = scrubSentryEvent({
+        message: `failed for ${email}`,
+        logentry: { message: `logentry ${email}` },
+        exception: {
+          values: [
+            { type: "Error", value: `Invalid invocation: email: '${email}'` },
+          ],
+        },
+        breadcrumbs: [{ message: `query for ${email}` }],
+      });
+
+      expect(JSON.stringify(result)).not.toContain(email);
+      expect(result.message).toContain("[email]");
+      expect(result.logentry?.message).toContain("[email]");
+      expect(result.exception?.values?.[0]?.value).toContain("[email]");
+      expect(result.breadcrumbs?.[0]?.message).toContain("[email]");
+    });
+
+    it("exception の type など、メッセージ以外のフィールドは変えない", () => {
+      const result = scrubSentryEvent({
+        exception: {
+          values: [
+            { type: "PrismaClientKnownRequestError", value: `x ${email}` },
+          ],
+        },
+      });
+      expect(result.exception?.values?.[0]?.type).toBe(
+        "PrismaClientKnownRequestError",
+      );
+    });
+
+    it("境界値: 値の無い exception / breadcrumb でも例外をスローしない", () => {
+      expect(() =>
+        scrubSentryEvent({
+          exception: { values: [{ type: "Error" }] },
+          breadcrumbs: [{ category: "console" }],
+        }),
+      ).not.toThrow();
+    });
+  });
 });

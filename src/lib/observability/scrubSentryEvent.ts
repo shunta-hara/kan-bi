@@ -7,6 +7,8 @@
 
 import type { Event } from "@sentry/nextjs";
 
+import { scrubText } from "@/lib/observability/scrubText";
+
 /** 除去対象のヘッダー名（小文字正規化済み） */
 const SCRUBBED_HEADERS = new Set([
   "cookie",
@@ -33,6 +35,8 @@ const SCRUBBED_HEADERS = new Set([
  * - `request.url` のクエリ文字列部分（パスのみ残す。不正 URL でも例外をスローしない）
  * - `user.email` / `user.ip_address`
  * - `request.data`（リクエストボディ全体）
+ * - メッセージ本文（`message` / `logentry.message` / `exception.values[].value` /
+ *   `breadcrumbs[].message`）のメールアドレス・JWT・Bearer トークン・トークン系の値（伏せ字）
  *
  * @param event Sentry イベント（null/undefined でも例外をスローしない）
  * @returns 除去後のイベント（破棄しない）
@@ -88,6 +92,32 @@ export function scrubSentryEvent(event: Event | null | undefined): Event {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { email: _email, ip_address: _ip, ...restUser } = result.user;
     result.user = Object.keys(restUser).length > 0 ? restUser : undefined;
+  }
+
+  // メッセージ本文の伏せ字（Prisma / Auth.js などのエラーは、クエリの値を含み得る）
+  if (typeof result.message === "string") {
+    result.message = scrubText(result.message);
+  }
+  if (result.logentry != null) {
+    result.logentry = {
+      ...result.logentry,
+      message: scrubText(result.logentry.message),
+    };
+  }
+  if (result.exception?.values != null) {
+    result.exception = {
+      ...result.exception,
+      values: result.exception.values.map((value) => ({
+        ...value,
+        value: scrubText(value.value),
+      })),
+    };
+  }
+  if (result.breadcrumbs != null) {
+    result.breadcrumbs = result.breadcrumbs.map((breadcrumb) => ({
+      ...breadcrumb,
+      message: scrubText(breadcrumb.message),
+    }));
   }
 
   return result;

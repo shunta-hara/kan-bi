@@ -43,10 +43,7 @@ export async function deleteAccountAction(
     await deleteUserAccount(session.user.id);
   } catch (error) {
     console.error("[account] deleteAccountAction failed", error);
-    captureServerException(
-      error instanceof Error ? error : new Error(String(error)),
-      { errorCode: "ACCOUNT_DELETE_FAILED" },
-    );
+    captureServerException(error, { errorCode: "ACCOUNT_DELETE_FAILED" });
     return {
       status: "error",
       message:

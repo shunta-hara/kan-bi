@@ -40,9 +40,6 @@ export async function recordAuditEvent(
   } catch (error) {
     // 監査ログの保存失敗でユーザー操作自体を失敗させない（非機能要件: 信頼性）。
     console.error("[audit] failed to record audit event", error);
-    captureServerException(
-      error instanceof Error ? error : new Error(String(error)),
-      { errorCode: "AUDIT_LOG_FAILED" },
-    );
+    captureServerException(error, { errorCode: "AUDIT_LOG_FAILED" });
   }
 }

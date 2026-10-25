@@ -189,6 +189,21 @@ describe("captureServerException", () => {
     });
   });
 
+  it("境界値: Error 以外の値（文字列・undefined）を渡すと Error に正規化して送る", async () => {
+    captureServerException("plain string failure", { errorCode: "UNKNOWN" });
+    captureServerException(undefined, { errorCode: "UNKNOWN" });
+
+    await vi.waitFor(() => {
+      expect(Sentry.captureException).toHaveBeenCalledTimes(2);
+    });
+    const sent = vi
+      .mocked(Sentry.captureException)
+      .mock.calls.map(([exception]) => exception);
+    expect(sent.every((exception) => exception instanceof Error)).toBe(true);
+    expect((sent[0] as Error).message).toBe("plain string failure");
+    expect((sent[1] as Error).message).toBe("undefined");
+  });
+
   it("正常系: errorCode のみのとき level が error になる", async () => {
     const error = new Error("Unknown error");
     captureServerException(error, { errorCode: "UNKNOWN" });

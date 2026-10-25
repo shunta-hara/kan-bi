@@ -51,15 +51,6 @@ function parseEnvelope(
 }
 
 /** ペイロードのフラット化（ネストされた request/user も検索対象にする） */
-function payloadContains(
-  payload: Record<string, unknown>,
-  key: string,
-): boolean {
-  const str = JSON.stringify(payload);
-  // キーが含まれているかを確認（値として含まれていても検知）
-  return str.includes(`"${key}"`);
-}
-
 beforeAll(async () => {
   // HTTP 受信サーバーを起動
   await new Promise<void>((resolve) => {
@@ -150,6 +141,22 @@ async function waitForPayload(
   );
 }
 
+/**
+ * 秘密に見える値は実行時に組み立てる。ソースにリテラルで書くと、スタックのコンテキスト行として
+ * envelope に入ってしまい、「値が envelope のどこにも現れない」ことを全体検索で検証できなくなる。
+ */
+const unique = Date.now().toString(36);
+const SECRET_COOKIE = ["sess", "cookie", unique].join("-");
+const SECRET_AUTH = ["bearer", "auth", unique].join("-");
+const SECRET_PDF_TOKEN = ["pdf", "token", unique].join("-");
+const CLIENT_IP = ["203", "0", "113", "77"].join(".");
+const PERSON_EMAIL = [`person.${unique}`, "example.com"].join("@");
+const JWT_LIKE = [
+  "eyJhbGciOiJIUzI1NiJ9",
+  "eyJzdWIiOiJ1c2VyIn0",
+  unique + "sig",
+].join(".");
+
 describe("Sentry 統合テスト", () => {
   it("(a) onRequestError にエラーを渡すとイベントがローカルサーバーに届く", async () => {
     const { onRequestError } = await import("@/instrumentation");
@@ -164,10 +171,10 @@ describe("Sentry 統合テスト", () => {
         path: "/api/test",
         method: "GET",
         headers: {
-          cookie: "session=secret-cookie",
-          authorization: "Bearer secret-token",
-          "x-pdf-token": "secret-pdf-token",
-          "x-forwarded-for": "192.168.0.1",
+          cookie: `session=${SECRET_COOKIE}`,
+          authorization: `Bearer ${SECRET_AUTH}`,
+          "x-pdf-token": SECRET_PDF_TOKEN,
+          "x-forwarded-for": CLIENT_IP,
           "x-request-id": "req-123",
         },
       },
@@ -200,10 +207,40 @@ describe("Sentry 統合テスト", () => {
     expect(
       (payload.request as Record<string, unknown> | undefined)?.cookies,
     ).toBeUndefined();
-    // 値として含まれていないことも確認
-    expect(payloadContains(payload, "secret-cookie")).toBe(false);
-    expect(payloadContains(payload, "secret-token")).toBe(false);
-    expect(payloadContains(payload, "secret-pdf-token")).toBe(false);
+    // 値そのものが、イベント全体（スタック・ブレッドクラムなども含む）のどこにも現れない
+    const raw = JSON.stringify(payload);
+    for (const secret of [
+      SECRET_COOKIE,
+      SECRET_AUTH,
+      SECRET_PDF_TOKEN,
+      CLIENT_IP,
+    ]) {
+      expect(raw).not.toContain(secret);
+    }
+  });
+
+  it("(d) メッセージに個人情報・トークンを含むエラーを送っても、envelope に現れない", async () => {
+    // Prisma / Auth.js のエラーは、失敗したクエリの値（メール等）をメッセージに含み得る
+    captureServerException(
+      new Error(
+        `Invalid prisma.user.create() invocation: data: { email: '${PERSON_EMAIL}' } token ${JWT_LIKE}`,
+      ),
+      { errorCode: "AUDIT_LOG_FAILED" },
+    );
+
+    const payload = await waitForPayload(
+      (p) =>
+        typeof p.tags === "object" &&
+        p.tags !== null &&
+        (p.tags as Record<string, unknown>).errorCode === "AUDIT_LOG_FAILED",
+    );
+
+    const raw = JSON.stringify(payload);
+    expect(raw).not.toContain(PERSON_EMAIL);
+    expect(raw).not.toContain(JWT_LIKE);
+    // 伏せ字になっていること（イベントは破棄されず、原因の手がかりは残る）
+    expect(raw).toContain("[email]");
+    expect(raw).toContain("Invalid prisma.user.create() invocation");
   });
 
   it("(b) logWidgetFetchError を呼ぶとタグ付きイベントが届く", async () => {
