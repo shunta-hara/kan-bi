@@ -30,7 +30,8 @@ export async function dragBy(
 ): Promise<void> {
   await target.waitFor({ state: "visible" });
   const box = await target.boundingBox();
-  if (!box) throw new Error("ドラッグ対象の bounding box を取得できませんでした");
+  if (!box)
+    throw new Error("ドラッグ対象の bounding box を取得できませんでした");
 
   const startX = box.x + box.width / 2;
   const startY = box.y + box.height / 2;
@@ -52,6 +53,7 @@ export async function dragBy(
  * 条件（`matches`）を満たす本文のレイアウト保存（PUT /api/dashboards/:id/layout）が成功するのを待ち、
  * その本文を返す。操作の「前」に呼んで Promise を保持し、操作後に await する。
  *
+ * `description` は、条件を満たす保存が来なかったときのエラーに添える説明（例: 「幅が縮んだレイアウト」）。
  * 条件を満たさない PUT は読み飛ばす。グリッドは初回の操作の前後に、レイアウトを変えない保存
  * （ブレークポイントの補完など）を送ることがあり、それを「操作の結果」と取り違えると、
  * 環境が遅いときだけ失敗する不安定なテストになる（実際に master で発生した）。
@@ -59,26 +61,35 @@ export async function dragBy(
 export async function waitForLayoutSave(
   page: Page,
   dashboardId: string,
+  description: string,
   matches: (body: LayoutPutBody) => boolean,
 ): Promise<LayoutPutBody> {
-  const response = await page.waitForResponse(
-    (resp) => {
-      if (
-        !resp.url().includes(`/api/dashboards/${dashboardId}/layout`) ||
-        resp.request().method() !== "PUT"
-      ) {
-        return false;
-      }
-      try {
-        return matches(
-          JSON.parse(resp.request().postData() ?? "{}") as LayoutPutBody,
-        );
-      } catch {
-        return false;
-      }
-    },
-    { timeout: 20_000 },
-  );
+  const response = await page
+    .waitForResponse(
+      (resp) => {
+        if (
+          !resp.url().includes(`/api/dashboards/${dashboardId}/layout`) ||
+          resp.request().method() !== "PUT"
+        ) {
+          return false;
+        }
+        try {
+          return matches(
+            JSON.parse(resp.request().postData() ?? "{}") as LayoutPutBody,
+          );
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 20_000 },
+    )
+    .catch((error: unknown) => {
+      // 汎用のタイムアウトでは「操作が効かなかった」のか「保存が来なかった」のか分からないため、
+      // 期待した条件を添えて投げ直す。
+      throw new Error(`期待したレイアウト保存が来なかった: ${description}`, {
+        cause: error,
+      });
+    });
   expect(response.status()).toBe(200);
   return JSON.parse(response.request().postData() ?? "{}") as LayoutPutBody;
 }

@@ -10,18 +10,29 @@
  * webServer は globalSetup より先に起動している。
  */
 
-import { request } from "@playwright/test";
+import { request, type APIRequestContext } from "@playwright/test";
 
-import {
-  cleanupUsers,
-  createTestDashboard,
-  createTestUser,
-} from "./db";
+import { cleanupUsers, createTestDashboard, createTestUser } from "./db";
 import { createTestPdfToken, cleanupPdfTokensByUserId } from "./pdfToken";
 import { createSessionCookieValue, SESSION_COOKIE_NAME } from "./session";
 
 /** 1 ルートあたりの上限（初回コンパイル込み） */
 const WARMUP_REQUEST_TIMEOUT_MS = 90_000;
+
+/**
+ * 1 ルートを要求してコンパイルさせる。目的はコンパイルなので失敗はさせないが、
+ * 5xx のときはどのルートかを警告する（壊れたルートを静かに通して原因を見えにくくしない）。
+ */
+async function warm(
+  context: APIRequestContext,
+  path: string,
+  headers?: Record<string, string>,
+): Promise<void> {
+  const response = await context.get(path, { headers, maxRedirects: 0 });
+  if (response.status() >= 500) {
+    console.warn(`[e2e warmup] ${path} returned ${response.status()}`);
+  }
+}
 
 export default async function warmup(): Promise<void> {
   const baseURL = process.env.AUTH_URL ?? "http://localhost:3001";
@@ -36,23 +47,34 @@ export default async function warmup(): Promise<void> {
       timeout: WARMUP_REQUEST_TIMEOUT_MS,
     });
 
+    // Cookie なしの要求。ログイン済みで /login に来るとミドルウェアが /dashboards へ
+    // リダイレクトして /login ページがコンパイルされないため、/ と /login は別に要求する
+    const anonymous = await request.newContext({
+      baseURL,
+      timeout: WARMUP_REQUEST_TIMEOUT_MS,
+    });
+
     try {
-      // ページ（ログイン済みで描画されるもの）。レスポンスの内容は問わず、コンパイルさせるのが目的
+      for (const path of ["/", "/login"]) {
+        await warm(anonymous, path);
+      }
+
+      // ページ（ログイン済みで描画されるもの）
       for (const path of [
-        "/login",
         "/dashboards",
         "/datasources",
         `/dashboards/${dashboard.id}`,
       ]) {
-        await api.get(path);
+        await warm(api, path);
       }
 
       // 印刷ページはトークン必須。トークンは単回使用なので専用のものを 1 つ消費する
       const token = await createTestPdfToken(user.id, dashboard.id);
-      await api.get(`/dashboards/${dashboard.id}/print`, {
-        headers: { "x-pdf-token": token },
+      await warm(api, `/dashboards/${dashboard.id}/print`, {
+        "x-pdf-token": token,
       });
     } finally {
+      await anonymous.dispose();
       await api.dispose();
     }
   } finally {

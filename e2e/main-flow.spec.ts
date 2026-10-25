@@ -177,15 +177,26 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
 
       // リサイズ: 右下のハンドルを左へ動かして幅を狭める。
       // 「幅が縮んだレイアウト」の保存が成功するまで待つ（変更を含まない保存は読み飛ばす）
-      const resizeSaved = waitForLayoutSave(page, dashboardId, (body) =>
-        someLayoutItem(body, (item) => item.w < 6),
+      const resizeSaved = waitForLayoutSave(
+        page,
+        dashboardId,
+        "幅が縮んだレイアウト（リサイズが効かなかった可能性）",
+        (body) => someLayoutItem(body, (item) => item.w < 6),
       );
-      await dragBy(page, card.locator(".react-resizable-handle").first(), -300, 0);
+      await dragBy(
+        page,
+        card.locator(".react-resizable-handle").first(),
+        -300,
+        0,
+      );
       await resizeSaved;
 
       // 移動: ヘッダー（ドラッグハンドル）を右へ動かす。「x が増えたレイアウト」の保存を待つ
-      const moveSaved = waitForLayoutSave(page, dashboardId, (body) =>
-        someLayoutItem(body, (item) => item.x > 0),
+      const moveSaved = waitForLayoutSave(
+        page,
+        dashboardId,
+        "x が増えたレイアウト（移動が効かなかった可能性）",
+        (body) => someLayoutItem(body, (item) => item.x > 0),
       );
       await dragBy(page, card.locator(".drag-handle").first(), 300, 0);
       await moveSaved;
@@ -202,7 +213,9 @@ test("main flow: login → dashboard → datasource → widget → layout → PD
       // 保存されたレイアウトから復元された位置・サイズが、編集前と明確に違うこと
       // （1 カラム ≒ 160px。リサイズで約 2 カラム縮み、右へ約 2 カラム動いている）
       // 復元時のアニメーションが終わってから測る
-      const after = await stableBoundingBox(page.locator(".react-grid-item").first());
+      const after = await stableBoundingBox(
+        page.locator(".react-grid-item").first(),
+      );
       expect(after.width).toBeLessThan(cardBeforeEdit.width - 100);
       expect(after.x).toBeGreaterThan(cardBeforeEdit.x + 100);
     });
