@@ -6,6 +6,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/prisma";
 import { recordAuditEvent } from "@/lib/audit/auditLog";
 import { authConfig } from "@/lib/auth/auth.config";
+import { captureServerException } from "@/lib/observability/logger";
 
 /**
  * Auth.js v5 のフル設定（仕様書 §3, §7, §FR-6 準拠）
@@ -43,6 +44,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         },
       });
       console.error(`[auth] ${error.name}: ${error.message}`);
+      captureServerException(error, { errorCode: error.name });
     },
   },
   callbacks: {

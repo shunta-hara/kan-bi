@@ -6,6 +6,7 @@ import { issuePdfToken } from "@/lib/pdf/pdfToken";
 import { pdfTokenRequestSchema, toPdfFormat } from "@/lib/pdf/schema";
 import { recordAuditEvent } from "@/lib/audit/auditLog";
 import { generateDashboardPdf } from "@/lib/pdf/playwrightPdf";
+import { captureServerException } from "@/lib/observability/logger";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -97,6 +98,7 @@ export async function GET(
     });
   } catch (e) {
     console.error("[pdf] PDF generation failed", e);
+    captureServerException(e, { errorCode: "PDF_GENERATION_FAILED" });
     return NextResponse.json(
       { error: "PDF generation failed" },
       { status: 500 },
